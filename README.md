@@ -5,7 +5,7 @@ This repository contains an ESPHome configuration for a **dual heat-cool thermos
 ## 📱 Hardware Specifications
 
 **Guition ESP32-S3-4848S040**
-- **Display**: 4 inch, 480 × 480 pixels IPS touchscreen
+- **Display**: ST7701S - 4 inch, 480 × 480 pixels IPS touchscreen
 - **MCU**: ESP32-S3 dual-core processor with 8MB PSRAM
 - **Touch**: GT911 capacitive touch controller
 - **Connectivity**: Wi-Fi 802.11 b/g/n
