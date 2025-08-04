@@ -1,0 +1,3756 @@
+esphome:
+  name: living-room-thermostat-1
+  friendly_name: Living Room Thermostat 1
+  includes:
+    - colors.h
+  platformio_options:
+    board_build.flash_mode: dio
+  on_boot:
+    priority: -100
+    then:
+    - delay: 5s
+    - script.execute: init_preset_temperatures
+    - globals.set:
+        id: boot_screen_hidden
+        value: 'false'
+    # Wait for sensor data
+    - wait_until:
+        condition:
+          lambda: 'return !isnan(id(thermostat_living).current_temperature);'
+        timeout: 30s
+    - lvgl.widget.hide: boot_screen
+    - globals.set:
+        id: boot_screen_hidden
+        value: 'true'
+    # Initialize the dual_current_temp_arc properly
+    - lambda: |-
+        // Get target temperatures
+        float target_low = id(thermostat_living).target_temperature_low;
+        float target_high = id(thermostat_living).target_temperature_high;
+        float current_temp = id(thermostat_living).current_temperature;
+        
+        // Fallback to preset defaults if values are invalid
+        if (isnan(target_low) || target_low < 10.0f || target_low > 40.0f) {
+          target_low = 21.0f;
+        }
+        if (isnan(target_high) || target_high < 10.0f || target_high > 40.0f) {
+          target_high = 23.0f;
+        }
+        
+        int target_low_arc_value = int(target_low * 10);
+        int target_high_arc_value = int(target_high * 10);
+        int current_temp_arc_value = int(current_temp * 10);
+        
+        // Set heat_sel_button to checked
+        lv_obj_add_state(id(heat_sel_button), LV_STATE_CHECKED);
+        
+        // Set dual_setpoint_arc to target_low value
+        lv_arc_set_value(id(dual_setpoint_arc), target_low_arc_value);
+        
+        // Initialize dual_current_temp_arc with proper styling - MATCH the climate on_state logic exactly
+        int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
+        int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
+        int normal_value = current_temp_arc_value; // Since we're in normal mode initially
+        
+        // Case 1: heating_value > normal_value (heating needed)
+        if (target_low_arc_value > normal_value) {
+          lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
+          lv_arc_set_value(id(dual_current_temp_arc), current_temp_arc_value);
+          
+          // Set dual_current_temp_arc colors
+          lv_obj_set_style_arc_color(id(dual_current_temp_arc), DARK_ORANGE, LV_PART_INDICATOR);
+          lv_obj_set_style_arc_opa(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR);
+          lv_obj_set_style_pad_all(id(dual_current_temp_arc), 0, LV_PART_KNOB);
+          lv_obj_set_style_border_color(id(dual_current_temp_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+          lv_obj_set_style_border_opa(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB);
+          
+          // Set heating_arc colors (should be BRIGHT_ORANGE when active)
+          lv_obj_set_style_arc_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_INDICATOR);
+          lv_obj_set_style_border_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+          lv_obj_set_style_bg_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+          
+          // Set cooling_arc colors (should be DARK when not active)
+          lv_obj_set_style_arc_color(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
+          lv_obj_set_style_border_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+          lv_obj_set_style_bg_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+          
+        }
+        // Case 2: cooling_value < normal_value (cooling needed)
+        else if (target_high_arc_value < normal_value) {
+          lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_REVERSE);
+          lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - current_temp_arc_value);
+          
+          // Set dual_current_temp_arc colors
+          lv_obj_set_style_arc_color(id(dual_current_temp_arc), DARK_BLUE, LV_PART_INDICATOR);
+          lv_obj_set_style_arc_opa(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR);
+          lv_obj_set_style_pad_all(id(dual_current_temp_arc), 0, LV_PART_KNOB);
+          lv_obj_set_style_border_color(id(dual_current_temp_arc), BRIGHT_BLUE, LV_PART_KNOB);
+          lv_obj_set_style_border_opa(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB);
+          
+          // Set cooling_arc colors (should be BRIGHT_BLUE when active)
+          lv_obj_set_style_arc_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_MAIN);
+          lv_obj_set_style_border_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+          lv_obj_set_style_bg_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+          
+          // Set heating_arc colors (should be DARK when not active)
+          lv_obj_set_style_arc_color(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
+          lv_obj_set_style_border_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+          lv_obj_set_style_bg_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+          
+        }
+        // Case 3: temperature is in range (cooling_value >= normal_value and heating_value <= normal_value)
+        else {
+          lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
+          lv_arc_set_value(id(dual_current_temp_arc), current_temp_arc_value);
+          
+          // Hide dual_current_temp_arc indicator and knob
+          lv_obj_set_style_arc_opa(id(dual_current_temp_arc), LV_OPA_0, LV_PART_INDICATOR);
+          lv_obj_set_style_pad_all(id(dual_current_temp_arc), -10, LV_PART_KNOB);
+          lv_obj_set_style_border_opa(id(dual_current_temp_arc), LV_OPA_0, LV_PART_KNOB);
+          
+          // Set both arcs to DARK colors when in range
+          lv_obj_set_style_arc_color(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
+          lv_obj_set_style_border_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+          lv_obj_set_style_bg_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+          
+          lv_obj_set_style_arc_color(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
+          lv_obj_set_style_border_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+          lv_obj_set_style_bg_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+        }
+        
+        ESP_LOGD("thermostat", "Boot init - current: %.1f, target_low: %.1f, target_high: %.1f", 
+                 current_temp, target_low, target_high);
+
+globals:
+  - id: updating_from_lvgl
+    type: bool
+    initial_value: 'false'
+  - id: last_target_low_ha
+    type: float
+    initial_value: '20.0'
+  - id: last_target_high_ha
+    type: float
+    initial_value: '25.0'
+  - id: update_from_button
+    type: bool
+    initial_value: 'false'
+  - id: boot_screen_hidden
+    type: bool
+    initial_value: 'false'
+
+  # Home Preset Settings
+  - id: preset_home_temp_low
+    type: float
+    restore_value: true
+    initial_value: '21.0'
+  - id: preset_home_temp_high
+    type: float
+    restore_value: true
+    initial_value: '24.0'
+  - id: preset_home_hour
+    type: int
+    restore_value: true
+    initial_value: '5'
+  - id: preset_home_minute
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: preset_home_days
+    type: int
+    restore_value: true
+    initial_value: '62'  # MON-FRI bitmask (1=MON, 2=TUE, 4=WED, 8=THU, 16=FRI, 32=SAT, 64=SUN)
+
+  # Away Preset Settings
+  - id: preset_away_temp_low
+    type: float
+    restore_value: true
+    initial_value: '18.0'
+  - id: preset_away_temp_high
+    type: float
+    restore_value: true
+    initial_value: '28.0'
+  - id: preset_away_hour
+    type: int
+    restore_value: true
+    initial_value: '8'
+  - id: preset_away_minute
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: preset_away_days
+    type: int
+    restore_value: true
+    initial_value: '62'  # MON-FRI
+
+  # Home Return Preset Settings
+  - id: preset_home_return_hour
+    type: int
+    restore_value: true
+    initial_value: '16'
+  - id: preset_home_return_minute
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: preset_home_return_days
+    type: int
+    restore_value: true
+    initial_value: '62'  # MON-FRI
+
+  # Sleep Preset Settings
+  - id: preset_sleep_temp_low
+    type: float
+    restore_value: true
+    initial_value: '19.0'
+  - id: preset_sleep_temp_high
+    type: float
+    restore_value: true
+    initial_value: '23.0'
+  - id: preset_sleep_hour
+    type: int
+    restore_value: true
+    initial_value: '22'
+  - id: preset_sleep_minute
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: preset_sleep_days
+    type: int
+    restore_value: true
+    initial_value: '127'  # SUN-SAT (all days)
+
+  # Weekend Home Preset Settings
+  - id: preset_weekend_home_hour
+    type: int
+    restore_value: true
+    initial_value: '7'
+  - id: preset_weekend_home_minute
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: preset_weekend_home_days
+    type: int
+    restore_value: true
+    initial_value: '96'  # SAT-SUN
+
+  # Control flags
+  - id: presets_enabled
+    type: bool
+    restore_value: true
+    initial_value: 'true'
+          
+# ==== NUMBER COMPONENTS FOR HOME ASSISTANT CONTROL ====
+number:
+  # Home Preset Controls
+  - platform: template
+    name: "Home Preset Low Temp"
+    id: home_preset_low_temp
+    min_value: 10.0
+    max_value: 30.0
+    step: 0.5
+    mode: box
+    unit_of_measurement: "°C"
+    lambda: 'return id(preset_home_temp_low);'
+    set_action:
+      - globals.set:
+          id: preset_home_temp_low
+          value: !lambda 'return x;'
+      - script.execute: update_preset_from_spinbox
+
+  - platform: template
+    name: "Home Preset High Temp"
+    id: home_preset_high_temp
+    min_value: 15.0
+    max_value: 35.0
+    step: 0.5
+    mode: box
+    unit_of_measurement: "°C"
+    lambda: 'return id(preset_home_temp_high);'
+    set_action:
+      - globals.set:
+          id: preset_home_temp_high
+          value: !lambda 'return x;'
+      - script.execute: update_preset_from_spinbox
+
+  # Away Preset Controls
+  - platform: template
+    name: "Away Preset Low Temp"
+    id: away_preset_low_temp
+    min_value: 10.0
+    max_value: 30.0
+    step: 0.5
+    mode: box
+    unit_of_measurement: "°C"
+    lambda: 'return id(preset_away_temp_low);'
+    set_action:
+      - globals.set:
+          id: preset_away_temp_low
+          value: !lambda 'return x;'
+      - script.execute: update_preset_from_spinbox
+
+  - platform: template
+    name: "Away Preset High Temp"
+    id: away_preset_high_temp
+    min_value: 15.0
+    max_value: 35.0
+    step: 0.5
+    mode: box
+    unit_of_measurement: "°C"
+    lambda: 'return id(preset_away_temp_high);'
+    set_action:
+      - globals.set:
+          id: preset_away_temp_high
+          value: !lambda 'return x;'
+      - script.execute: update_preset_from_spinbox
+
+  # Sleep Preset Controls
+  - platform: template
+    name: "Sleep Preset Low Temp"
+    id: sleep_preset_low_temp
+    min_value: 10.0
+    max_value: 30.0
+    step: 0.5
+    mode: box
+    unit_of_measurement: "°C"
+    lambda: 'return id(preset_sleep_temp_low);'
+    set_action:
+      - globals.set:
+          id: preset_sleep_temp_low
+          value: !lambda 'return x;'
+      - script.execute: update_preset_from_spinbox
+
+  - platform: template
+    name: "Sleep Preset High Temp"
+    id: sleep_preset_high_temp
+    min_value: 15.0
+    max_value: 35.0
+    step: 0.5
+    mode: box
+    unit_of_measurement: "°C"
+    lambda: 'return id(preset_sleep_temp_high);'
+    set_action:
+      - globals.set:
+          id: preset_sleep_temp_high
+          value: !lambda 'return x;'
+      - script.execute: update_preset_from_spinbox
+
+  # All time controls to match LVGL IDs
+  - platform: template
+    name: "Home Preset Hour"
+    id: home_preset_hour_num
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    lambda: 'return id(preset_home_hour);'
+    set_action:
+      - globals.set:
+          id: preset_home_hour
+          value: !lambda 'return (int)x;'
+
+  - platform: template
+    name: "Home Preset Minute"
+    id: home_preset_minute_num
+    min_value: 0
+    max_value: 59
+    step: 1
+    mode: box
+    lambda: 'return id(preset_home_minute);'
+    set_action:
+      - globals.set:
+          id: preset_home_minute
+          value: !lambda 'return (int)x;'
+
+  # Away time controls
+  - platform: template
+    name: "Away Preset Hour"
+    id: away_preset_hour_num
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    lambda: 'return id(preset_away_hour);'
+    set_action:
+      - globals.set:
+          id: preset_away_hour
+          value: !lambda 'return (int)x;'
+
+  - platform: template
+    name: "Away Preset Minute"
+    id: away_preset_minute_num
+    min_value: 0
+    max_value: 59
+    step: 1
+    mode: box
+    lambda: 'return id(preset_away_minute);'
+    set_action:
+      - globals.set:
+          id: preset_away_minute
+          value: !lambda 'return (int)x;'
+
+  # Return home time controls
+  - platform: template
+    name: "Return Home Hour"
+    id: return_home_hour_num
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    lambda: 'return id(preset_home_return_hour);'
+    set_action:
+      - globals.set:
+          id: preset_home_return_hour
+          value: !lambda 'return (int)x;'
+
+  - platform: template
+    name: "Return Home Minute"
+    id: return_home_minute_num
+    min_value: 0
+    max_value: 59
+    step: 1
+    mode: box
+    lambda: 'return id(preset_home_return_minute);'
+    set_action:
+      - globals.set:
+          id: preset_home_return_minute
+          value: !lambda 'return (int)x;'
+
+  # Sleep time controls
+  - platform: template
+    name: "Sleep Preset Hour"
+    id: sleep_preset_hour_num
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    lambda: 'return id(preset_sleep_hour);'
+    set_action:
+      - globals.set:
+          id: preset_sleep_hour
+          value: !lambda 'return (int)x;'
+
+  - platform: template
+    name: "Sleep Preset Minute"
+    id: sleep_preset_minute_num
+    min_value: 0
+    max_value: 59
+    step: 1
+    mode: box
+    lambda: 'return id(preset_sleep_minute);'
+    set_action:
+      - globals.set:
+          id: preset_sleep_minute
+          value: !lambda 'return (int)x;'
+
+  # Weekend time controls
+  - platform: template
+    name: "Weekend Home Hour"
+    id: weekend_home_hour_num
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: box
+    lambda: 'return id(preset_weekend_home_hour);'
+    set_action:
+      - globals.set:
+          id: preset_weekend_home_hour
+          value: !lambda 'return (int)x;'
+
+  - platform: template
+    name: "Weekend Home Minute"
+    id: weekend_home_minute_num
+    min_value: 0
+    max_value: 59
+    step: 1
+    mode: box
+    lambda: 'return id(preset_weekend_home_minute);'
+    set_action:
+      - globals.set:
+          id: preset_weekend_home_minute
+          value: !lambda 'return (int)x;'
+
+  # Add other time controls as needed...
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      COMPILER_OPTIMIZATION_SIZE: y
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
+      CONFIG_SPIRAM_RODATA: y
+      
+psram:
+  mode: octal
+  speed: 80MHz  
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_key
+
+# Enable Over-The-Air (OTA) platform to remotely install modified/updated firmware
+ota:
+ - platform: esphome
+   password: !secret ota_password
+
+wifi:
+  id: wifi_id
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  on_connect:
+    - lvgl.label.update:
+        id: ip_label
+        text:
+          format: "\uF1EB %s"
+          args: [ 'id(wifi_id).wifi_sta_ip_addresses()[0].str().c_str()' ]
+  on_disconnect:
+    - lvgl.label.update:
+        id: ip_label
+        text: "\uF1EB disconnected"
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Guition-S3-Square-4-Inch"
+    password: !secret ap_password
+    
+# Enable captive portal as fallback mechanism for when connecting to the configured WiFi fails.
+captive_portal:
+
+# Enable simple web server to remotelly control the device using web interface
+web_server:
+
+
+time:
+  - platform: homeassistant
+    id: my_time
+  - platform: sntp
+    id: preset_time
+    timezone: "Europe/Bucharest"
+    on_time:
+      # Check every minute if we should trigger preset changes
+      - seconds: 0
+        then:
+          - lambda: |-
+              // Get current time
+              auto time = id(preset_time).now();
+              int current_hour = time.hour;
+              int current_minute = time.minute;
+              int current_dow = time.day_of_week; // 1=Sunday, 2=Monday, etc.
+              
+              // Check if it's a weekday (Monday-Friday = 2-6)
+              bool is_weekday = (current_dow >= 2 && current_dow <= 6);
+              
+              // Check for Home preset time (weekdays)
+              if (is_weekday && 
+                  current_hour == (int)id(preset_home_hour) && 
+                  current_minute == (int)id(preset_home_minute) &&
+                  id(presets_enabled)) {
+                ESP_LOGI("scheduler", "Triggering Home preset");
+                auto call = id(thermostat_living).make_call();
+                call.set_preset("Home");
+                call.perform();
+              }
+              
+              // Check for Away preset time (weekdays)
+              if (is_weekday && 
+                  current_hour == (int)id(preset_away_hour) && 
+                  current_minute == (int)id(preset_away_minute) &&
+                  id(presets_enabled)) {
+                ESP_LOGI("scheduler", "Triggering Away preset");
+                auto call = id(thermostat_living).make_call();
+                call.set_preset("Away");
+                call.perform();
+              }
+              
+              // Check for Sleep preset time (all days)
+              if (current_hour == (int)id(preset_sleep_hour) && 
+                  current_minute == (int)id(preset_sleep_minute) &&
+                  id(presets_enabled)) {
+                ESP_LOGI("scheduler", "Triggering Sleep preset");
+                auto call = id(thermostat_living).make_call();
+                call.set_preset("Sleep");
+                call.perform();
+              }
+              
+              // Check for weekend Home time (Saturday-Sunday = 7,1)
+              bool is_weekend = (current_dow == 1 || current_dow == 7);
+              if (is_weekend && 
+                  current_hour == (int)id(preset_weekend_home_hour) && 
+                  current_minute == (int)id(preset_weekend_home_minute) &&
+                  id(presets_enabled)) {
+                ESP_LOGI("scheduler", "Triggering Weekend Home preset");
+                auto call = id(thermostat_living).make_call();
+                call.set_preset("Home");
+                call.perform();
+                }
+
+switch:
+  - platform: gpio
+    pin: GPIO40
+    id: relay_1
+    inverted: False
+  - platform: template
+    name: "Preset Schedule Switch"
+    id: preset_schedule_switch
+    lambda: 'return id(presets_enabled);'
+    turn_on_action:
+      - globals.set:
+          id: presets_enabled
+          value: 'true'
+    turn_off_action:
+      - globals.set:
+          id: presets_enabled
+          value: 'false'
+
+output:
+  - platform: ledc
+    pin: GPIO38
+    id: backlight_output
+    frequency: 100Hz
+
+# Use light component for backlight brithness configuration
+light:
+  - platform: monochromatic
+    id: backlight
+    name: Thermostat Backlight
+    output: backlight_output
+    restore_mode: ALWAYS_ON
+    default_transition_length: 0s
+
+# Interval to update time and date from Home Assistant
+interval:
+  - interval: 60s
+    then:
+      - lvgl.label.update:
+          id: date_label
+          text: !lambda |-
+            auto time = id(my_time).now();
+            return time.strftime("%H:%M %a %d %b");
+
+sensor:
+  - platform: homeassistant
+    id: ble_sensor_raw
+    entity_id: sensor.temperature_sensor_1_temperature
+    
+# ==== INITIALIZATION SCRIPT ====
+script:
+  - id: apply_custom_preset_temperatures
+    then:
+      - delay: 100ms  # Small delay to let preset change complete
+      - lambda: |-
+          // Get current preset and apply corresponding custom temperatures
+          auto current_preset = id(thermostat_living).preset;
+          float target_low = 20.0;
+          float target_high = 22.0;
+          
+          if (current_preset == CLIMATE_PRESET_HOME) {
+            target_low = id(preset_home_temp_low);
+            target_high = id(preset_home_temp_high);
+            ESP_LOGI("thermostat", "Applying Home preset: %.1f - %.1f", target_low, target_high);
+          } else if (current_preset == CLIMATE_PRESET_AWAY) {
+            target_low = id(preset_away_temp_low);
+            target_high = id(preset_away_temp_high);
+            ESP_LOGI("thermostat", "Applying Away preset: %.1f - %.1f", target_low, target_high);
+          } else if (current_preset == CLIMATE_PRESET_SLEEP) {
+            target_low = id(preset_sleep_temp_low);
+            target_high = id(preset_sleep_temp_high);
+            ESP_LOGI("thermostat", "Applying Sleep preset: %.1f - %.1f", target_low, target_high);
+          }
+          
+          // Apply the custom temperatures
+          auto call = id(thermostat_living).make_call();
+          call.set_target_temperature_low(target_low);
+          call.set_target_temperature_high(target_high);
+          call.perform();
+
+  - id: update_current_preset_if_active
+    then:
+      - delay: 50ms
+      - lambda: |-
+          // Only update if we're currently using the preset being modified
+          auto current_preset = id(thermostat_living).preset;
+          bool should_update = false;
+          float target_low = 20.0;
+          float target_high = 22.0;
+          
+          if (current_preset == CLIMATE_PRESET_HOME) {
+            target_low = id(preset_home_temp_low);
+            target_high = id(preset_home_temp_high);
+            should_update = true;
+          } else if (current_preset == CLIMATE_PRESET_AWAY) {
+            target_low = id(preset_away_temp_low);
+            target_high = id(preset_away_temp_high);
+            should_update = true;
+          } else if (current_preset == CLIMATE_PRESET_SLEEP) {
+            target_low = id(preset_sleep_temp_low);
+            target_high = id(preset_sleep_temp_high);
+            should_update = true;
+          }
+          
+          if (should_update) {
+            auto call = id(thermostat_living).make_call();
+            call.set_target_temperature_low(target_low);
+            call.set_target_temperature_high(target_high);
+            call.perform();
+            ESP_LOGI("thermostat", "Updated active preset temperatures: %.1f - %.1f", target_low, target_high);
+          }
+
+  # Updated script to handle LVGL slider updates instead of spinbox
+  - id: update_preset_from_spinbox
+    then:
+      - script.execute: update_current_preset_if_active
+
+  - id: apply_preset_immediately
+    parameters:
+      preset_name: string
+    then:
+      - lambda: |-
+          std::string preset = preset_name;
+          ESP_LOGI("presets", "Switching to preset: %s", preset.c_str());
+          
+          // Switch to the preset - this will trigger apply_custom_preset_temperatures
+          auto call = id(thermostat_living).make_call();
+          call.set_preset(preset);
+          call.perform();
+
+  - id: init_preset_temperatures
+    then:
+      - delay: 3s  # Increased delay to allow LVGL to fully initialize
+      - script.execute: apply_custom_preset_temperatures
+      - lambda: |-
+          ESP_LOGI("presets", "Preset temperatures initialized");
+          ESP_LOGI("presets", "Home: %.1f - %.1f", id(preset_home_temp_low), id(preset_home_temp_high));
+          ESP_LOGI("presets", "Away: %.1f - %.1f", id(preset_away_temp_low), id(preset_away_temp_high));
+          ESP_LOGI("presets", "Sleep: %.1f - %.1f", id(preset_sleep_temp_low), id(preset_sleep_temp_high));
+
+  - id: save_preset_settings
+    then:
+      - lambda: |-
+          ESP_LOGI("presets", "Preset settings are automatically saved in globals");
+          ESP_LOGI("presets", "Current values:");
+          ESP_LOGI("presets", "Home: %.1f - %.1f", id(preset_home_temp_low), id(preset_home_temp_high));
+          ESP_LOGI("presets", "Away: %.1f - %.1f", id(preset_away_temp_low), id(preset_away_temp_high));
+          ESP_LOGI("presets", "Sleep: %.1f - %.1f", id(preset_sleep_temp_low), id(preset_sleep_temp_high));
+
+  # Updated script to load values to sliders and labels instead of spinboxes
+  - id: load_preset_values_to_display
+    then:
+      - delay: 200ms  # Give LVGL time to render the page
+      - lambda: |-
+          ESP_LOGI("presets", "Loading preset values to LVGL display");
+          ESP_LOGI("presets", "Home values: %.1f - %.1f", id(preset_home_temp_low), id(preset_home_temp_high));
+          
+          // Load temperature values to sliders (multiply by 10 for slider format)
+          lv_slider_set_value(id(home_low_slider), (int32_t)(id(preset_home_temp_low) * 10), LV_ANIM_OFF);
+          lv_slider_set_value(id(home_high_slider), (int32_t)(id(preset_home_temp_high) * 10), LV_ANIM_OFF);
+          lv_slider_set_value(id(away_low_slider), (int32_t)(id(preset_away_temp_low) * 10), LV_ANIM_OFF);
+          lv_slider_set_value(id(away_high_slider), (int32_t)(id(preset_away_temp_high) * 10), LV_ANIM_OFF);
+          lv_slider_set_value(id(sleep_low_slider), (int32_t)(id(preset_sleep_temp_low) * 10), LV_ANIM_OFF);
+          lv_slider_set_value(id(sleep_high_slider), (int32_t)(id(preset_sleep_temp_high) * 10), LV_ANIM_OFF);
+
+          // Load starting times for presets
+          char buf[16];
+          snprintf(buf, sizeof(buf), "%.1f°C", (float)id(preset_home_temp_low));
+          lv_label_set_text(id(home_low_temp_label), buf);
+          snprintf(buf, sizeof(buf), "%.1f°C", (float)id(preset_home_temp_high));
+          lv_label_set_text(id(home_high_temp_label), buf);
+          snprintf(buf, sizeof(buf), "%.1f°C", (float)id(preset_away_temp_low));
+          lv_label_set_text(id(away_low_temp_label), buf);
+          snprintf(buf, sizeof(buf), "%.1f°C", (float)id(preset_away_temp_high));
+          lv_label_set_text(id(away_high_temp_label), buf);
+          snprintf(buf, sizeof(buf), "%.1f°C", (float)id(preset_sleep_temp_low));
+          lv_label_set_text(id(sleep_low_temp_label), buf);
+          snprintf(buf, sizeof(buf), "%.1f°C", (float)id(preset_sleep_temp_high));
+          lv_label_set_text(id(sleep_high_temp_label), buf);
+          
+          // Load time values to labels
+          lv_label_set_text_fmt(id(home_hour_label), "%02d", id(preset_home_hour));
+          lv_label_set_text_fmt(id(home_minute_label), "%02d", id(preset_home_minute));
+          lv_label_set_text_fmt(id(away_hour_label), "%02d", id(preset_away_hour));
+          lv_label_set_text_fmt(id(away_minute_label), "%02d", id(preset_away_minute));
+          lv_label_set_text_fmt(id(return_hour_label), "%02d", id(preset_home_return_hour));
+          lv_label_set_text_fmt(id(return_minute_label), "%02d", id(preset_home_return_minute));
+          lv_label_set_text_fmt(id(sleep_hour_label), "%02d", id(preset_sleep_hour));
+          lv_label_set_text_fmt(id(sleep_minute_label), "%02d", id(preset_sleep_minute));
+          lv_label_set_text_fmt(id(weekend_hour_label), "%02d", id(preset_weekend_home_hour));
+          lv_label_set_text_fmt(id(weekend_minute_label), "%02d", id(preset_weekend_home_minute));
+
+          lv_label_set_text_fmt(id(home_time_display), "%02d:%02d", id(preset_home_hour), id(preset_home_minute));
+          lv_label_set_text_fmt(id(away_time_display), "%02d:%02d", id(preset_away_hour), id(preset_away_minute));
+          lv_label_set_text_fmt(id(sleep_time_display), "%02d:%02d", id(preset_sleep_hour), id(preset_sleep_minute));
+          lv_label_set_text_fmt(id(return_time_display), "%02d:%02d", id(preset_home_return_hour), id(preset_home_return_minute));
+          lv_label_set_text_fmt(id(weekend_time_display), "%02d:%02d", id(preset_weekend_home_hour), id(preset_weekend_home_minute));
+          
+          // Update enable switch
+          if (id(presets_enabled)) {
+            lv_obj_add_state(id(preset_enable_switch), LV_STATE_CHECKED);
+          } else {
+            lv_obj_clear_state(id(preset_enable_switch), LV_STATE_CHECKED);
+          }
+          
+          ESP_LOGI("presets", "LVGL values loaded successfully");
+
+  - id: show_presets_page
+    then:
+      - lvgl.page.show: presets_page
+      - script.execute: load_preset_values_to_display
+
+  - id: update_schedule
+    then:
+      - lambda: |-
+          ESP_LOGI("scheduler", "Schedule updated with new preset times");
+
+climate:
+  - platform: thermostat
+    id: thermostat_living
+    name: "Heating-Cooling Climate"
+    # Static preset configurations - these will be updated dynamically
+    preset:
+      - name: Home
+        # Use static default values - we'll override these dynamically
+        default_target_temperature_low: 20.0
+        default_target_temperature_high: 22.0
+      - name: Away
+        default_target_temperature_low: 18.0
+        default_target_temperature_high: 24.0
+      - name: Sleep
+        default_target_temperature_low: 17.0
+        default_target_temperature_high: 23.0
+    
+    # Add a preset change handler to apply our custom temperatures
+    preset_change:
+      - script.execute: apply_custom_preset_temperatures
+    sensor: ble_sensor_raw
+    heat_deadband: 0.5
+    heat_overrun: 0.5
+    default_preset: Home
+    on_boot_restore_from: memory
+    min_heating_off_time: 6s
+    min_heating_run_time: 6s
+    min_cooling_off_time: 6s
+    min_cooling_run_time: 6s
+    min_idle_time: 6s
+    visual:
+      min_temperature: 10
+      max_temperature: 40
+    heat_action:
+      - switch.turn_on: relay_1
+    cool_action:
+      - switch.turn_on: relay_1
+    idle_action:
+      - switch.turn_off: relay_1
+
+    on_state:
+      - if:
+          condition:
+            lambda: 'return x.action == esphome::climate::CLIMATE_ACTION_HEATING;'
+          then:
+            - lvgl.widget.update:
+                id: glow_obj
+                bg_image_src: heating_glow
+                hidden: false
+      - if:
+          condition:
+            lambda: 'return x.action == esphome::climate::CLIMATE_ACTION_COOLING;'
+          then:
+            - lvgl.widget.update:
+                id: glow_obj
+                bg_image_src: cooling_glow
+                hidden: false
+      - if:
+          condition:
+            lambda: 'return x.action == esphome::climate::CLIMATE_ACTION_IDLE;'
+          then:
+            - lvgl.widget.update:
+                id: glow_obj
+                hidden: true
+
+      - lambda: |-
+          if (id(update_from_button)) {
+            // the change came from the buttons, so we don't change the button states to avoid recursion
+            return;
+          }
+
+          // clear all buttons
+          lv_obj_clear_state(id(heat_btn), LV_STATE_CHECKED);
+          lv_obj_clear_state(id(auto_btn), LV_STATE_CHECKED);
+          lv_obj_clear_state(id(cool_btn), LV_STATE_CHECKED);
+          lv_obj_clear_state(id(off_btn), LV_STATE_CHECKED);
+
+          // update the button state according to the current climate mode
+          if (x.mode == climate::CLIMATE_MODE_HEAT) {
+            lv_obj_add_state(id(heat_btn), LV_STATE_CHECKED);
+          } else if (x.mode == climate::CLIMATE_MODE_HEAT_COOL) {
+            lv_obj_add_state(id(auto_btn), LV_STATE_CHECKED);
+          } else if (x.mode == climate::CLIMATE_MODE_COOL) {
+            lv_obj_add_state(id(cool_btn), LV_STATE_CHECKED);
+          } else if (x.mode == climate::CLIMATE_MODE_OFF) {
+            lv_obj_add_state(id(off_btn), LV_STATE_CHECKED);
+          }
+
+          // Helper function definitions inline
+          auto set_arc_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
+            lv_color_t current_color = lv_obj_get_style_arc_color(obj, part);
+            if (current_color.full != new_color.full) {
+              lv_obj_set_style_arc_color(obj, new_color, part);
+            }
+          };
+
+          auto set_border_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
+            lv_color_t current_color = lv_obj_get_style_border_color(obj, part);
+            if (current_color.full != new_color.full) {
+              lv_obj_set_style_border_color(obj, new_color, part);
+            }
+          };
+
+          auto set_bg_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
+            lv_color_t current_color = lv_obj_get_style_bg_color(obj, part);
+            if (current_color.full != new_color.full) {
+              lv_obj_set_style_bg_color(obj, new_color, part);
+            }
+          };
+
+          auto set_opa_if_different = [](lv_obj_t* obj, lv_opa_t new_opa, lv_part_t part, lv_style_prop_t prop) {
+            lv_opa_t current_opa = (prop == LV_STYLE_ARC_OPA) ? lv_obj_get_style_arc_opa(obj, part) : lv_obj_get_style_border_opa(obj, part);
+            if (current_opa != new_opa) {
+              if (prop == LV_STYLE_ARC_OPA) {
+                lv_obj_set_style_arc_opa(obj, new_opa, part);
+              } else {
+                lv_obj_set_style_border_opa(obj, new_opa, part);
+              }
+            }
+          };
+
+          auto set_pad_if_different = [](lv_obj_t* obj, lv_coord_t pad_value, lv_part_t part) {
+            lv_coord_t current_pad_top = lv_obj_get_style_pad_top(obj, part);
+            lv_coord_t current_pad_bottom = lv_obj_get_style_pad_bottom(obj, part);
+            lv_coord_t current_pad_left = lv_obj_get_style_pad_left(obj, part);
+            lv_coord_t current_pad_right = lv_obj_get_style_pad_right(obj, part);
+
+            if (current_pad_top != pad_value || current_pad_bottom != pad_value || current_pad_left != pad_value || current_pad_right != pad_value) {
+              lv_obj_set_style_pad_all(obj, pad_value, part);
+            }
+          };
+
+          static float prev_low = -9999.0f;
+          static float prev_high = -9999.0f;
+          static float prev_current = -9999.0f;
+          static climate::ClimatePreset prev_preset = climate::CLIMATE_PRESET_NONE;  // ADD: Track previous preset
+
+          float low = x.target_temperature_low;
+          float high = x.target_temperature_high;
+          float current = x.current_temperature;
+          climate::ClimatePreset current_preset = x.preset.value_or(climate::CLIMATE_PRESET_NONE);  // ADD: Get current preset
+          const float min_gap = 2.0f;
+          const float min_temp = 10.0f;
+          const float max_temp = 40.0f;
+
+          bool low_changed = (abs(low - prev_low) > 0.05);
+          bool high_changed = (abs(high - prev_high) > 0.05);
+          bool current_changed = (abs(current - prev_current) > 0.05);
+          bool preset_changed = (current_preset != prev_preset);  // ADD: Check preset change
+          bool pushed = false;
+
+          // Check if TARGET temperatures changed from Home Assistant OR preset changed
+          bool temp_changed_from_ha = false;
+          
+          // Include preset changes in the detection logic
+          if (!id(updating_from_lvgl)) {
+            if (low_changed || high_changed || preset_changed) {  // ADD: preset_changed condition
+              temp_changed_from_ha = true;
+              ESP_LOGD("thermostat", "Temperature/Preset change detected: low=%.1f, high=%.1f, preset=%d", 
+                      low, high, (int)current_preset);  // MODIFIED: Include preset in log
+            }
+          }
+
+          // Maintaining the minimum distance between temperatures
+          if (high - low < min_gap) {
+            if (low_changed && !high_changed) {
+              float new_high = low + min_gap;
+              if (new_high > max_temp)
+                new_high = max_temp;
+              id(thermostat_living).target_temperature_high = new_high;
+              high = new_high;
+              pushed = true;
+            } else if (high_changed && !low_changed) {
+              float new_low = high - min_gap;
+              if (new_low < min_temp)
+                new_low = min_temp;
+              id(thermostat_living).target_temperature_low = new_low;
+              low = new_low;
+              pushed = true;
+            }
+          }
+
+          // update the arcs with the correct values, regardless of the source
+          int target_low_arc_value = int(low * 10);
+          int target_high_arc_value = int(high * 10);
+          
+          // We force the arcs to update to the correct values
+          lv_arc_set_value(id(heating_arc), target_low_arc_value);
+          lv_arc_set_value(id(cooling_arc), target_high_arc_value);
+
+          // Retrieve variables for arc state and update styles
+          int cooling_value = lv_arc_get_value(id(cooling_arc));
+          int heating_value = lv_arc_get_value(id(heating_arc));
+          int actual_value = lv_arc_get_value(id(dual_current_temp_arc));
+          int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
+          int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
+          lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
+
+          int normal_value = (current_mode == LV_ARC_MODE_REVERSE) ? (max_val + min_val - actual_value) : actual_value;
+
+          bool heat_checked = lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);
+          bool cool_checked = lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);
+
+          // Update arc styles according to conditions
+          if (heating_value > normal_value) {
+            if (current_mode != LV_ARC_MODE_NORMAL) {
+              lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
+              lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
+            }
+            set_arc_color_if_different(id(dual_current_temp_arc), DARK_ORANGE, LV_PART_INDICATOR);
+            set_arc_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_INDICATOR);
+            set_border_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+
+            set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
+            set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+
+          } else if (cooling_value < normal_value) {
+            if (current_mode != LV_ARC_MODE_REVERSE) {
+              lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_REVERSE);
+              lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
+            }
+            set_arc_color_if_different(id(dual_current_temp_arc), DARK_BLUE, LV_PART_INDICATOR);
+            set_arc_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_MAIN);
+            set_border_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+
+            set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
+            set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_BLUE, LV_PART_KNOB);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+
+          } else {
+            if (current_mode != LV_ARC_MODE_NORMAL) {
+              lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
+              lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
+            }
+            set_arc_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
+            set_border_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+
+            set_arc_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
+            set_border_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+            set_pad_if_different(id(dual_current_temp_arc), -10, LV_PART_KNOB);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+
+            if (heat_checked) {
+              set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+            } else if (cool_checked) {
+              set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+            }
+          }
+
+          // Only clear button states if change comes from HA or preset
+          if (temp_changed_from_ha) {  // This now includes preset changes
+            if (heat_checked) {
+              lv_obj_clear_state(id(heat_sel_button), LV_STATE_CHECKED);
+              lv_obj_set_style_text_color(id(heat_setpoint_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              lv_obj_set_style_text_color(id(heat_decimal_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              lv_obj_set_style_text_color(id(heat_celsius_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              // Change border_color for temp buttons to NEUTRAL_GRAY
+              set_border_color_if_different(id(temp_plus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              set_border_color_if_different(id(temp_minus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              if (heating_value > normal_value) {
+                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+                set_bg_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+              }
+              else if (cooling_value < normal_value){
+                set_bg_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+              }
+              else{
+                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+              }
+            }
+
+            else if (cool_checked) {
+              lv_obj_clear_state(id(cool_sel_button), LV_STATE_CHECKED);
+              lv_obj_set_style_text_color(id(cool_setpoint_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              lv_obj_set_style_text_color(id(cool_decimal_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              lv_obj_set_style_text_color(id(cool_celsius_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              // Change border_color for temp buttons to NEUTRAL_GRAY
+              set_border_color_if_different(id(temp_plus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              set_border_color_if_different(id(temp_minus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+              if (heating_value > normal_value) {
+                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+                set_bg_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+              }
+              else if (cooling_value < normal_value){
+                set_bg_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+              }
+              else{
+                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+              }
+            }
+
+            else {
+              if (heating_value > normal_value) {
+                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+                set_bg_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+              }
+              else if (cooling_value < normal_value){
+                set_bg_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+              }
+              else{
+                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+              }
+            }
+          }
+
+          // Color update based on climate status
+          lv_color_t status_color;
+          switch (x.action) {
+            case esphome::climate::CLIMATE_ACTION_HEATING:
+              status_color = BRIGHT_ORANGE;
+              break;
+            case esphome::climate::CLIMATE_ACTION_COOLING:
+              status_color = BRIGHT_BLUE;
+              break;
+            case esphome::climate::CLIMATE_ACTION_IDLE:
+              status_color = WHITE;
+              break;
+            default: // OFF sau alte stări
+              status_color = LIGHT_GRAY;
+              break;
+          }
+          
+          // Update colors for labels based on status
+          lv_obj_set_style_text_color(id(dual_action_label), status_color, LV_STATE_DEFAULT);
+          lv_obj_set_style_text_color(id(dual_temperature_label), status_color, LV_STATE_DEFAULT);
+          lv_obj_set_style_text_color(id(thermometer_sign_label), status_color, LV_STATE_DEFAULT);
+
+          // keep previous values updated for next call
+          prev_low = low;
+          prev_high = high;
+          prev_current = current;
+          prev_preset = current_preset;  // ADD: Track preset changes
+    
+      - lvgl.label.update:
+          id: dual_temperature_label
+          text:
+            format: "%.1f°"
+            args: [ 'x.current_temperature' ]
+
+      - lvgl.label.update:
+          id: heat_setpoint_label
+          text:
+            format: "%d"
+            args: [ '(int)(x.target_temperature_low)' ]
+      - lvgl.label.update:
+          id: heat_decimal_label
+          text:
+            format: ".%d"
+            args: [ '((int)(x.target_temperature_low * 10)) % 10' ]
+
+      - lvgl.label.update:
+          id: cool_setpoint_label
+          text:
+            format: "%d"
+            args: [ '(int)(x.target_temperature_high)' ]
+      - lvgl.label.update:
+          id: cool_decimal_label
+          text:
+            format: ".%d"
+            args: [ '((int)(x.target_temperature_high * 10)) % 10' ]
+
+      - lvgl.arc.update:
+          id: dual_current_temp_arc
+          value: !lambda |-
+            int temp_value = id(thermostat_living).current_temperature * 10;
+            lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
+            if (current_mode == LV_ARC_MODE_REVERSE) {
+              int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
+              int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
+              return max_val + min_val - temp_value;
+            }
+            return temp_value;
+
+      - lvgl.label.update:
+          id: dual_action_label
+          text: !lambda return std::string(LOG_STR_ARG(climate_action_to_string(x.action)));
+          
+      - logger.log:
+          format: "climate mode=%s, temp_low=%.1f, temp_high=%.1f"
+          args: [
+            'std::string(LOG_STR_ARG(climate_mode_to_string(x.mode))).c_str()',
+            'x.target_temperature_low',
+            'x.target_temperature_high'
+          ]
+          level: INFO
+
+spi:
+  clk_pin:
+    number: GPIO48
+  mosi_pin:
+    number: GPIO47
+
+display:
+  - platform: st7701s
+    id: my_display
+    update_interval: never
+    auto_clear_enabled: false
+    data_rate: 2MHz
+    spi_mode: MODE3
+    color_order: RGB
+    invert_colors: false
+    dimensions:
+      width: 480
+      height: 480
+    transform:
+      mirror_x: false
+      mirror_y: false
+    cs_pin: 39
+      # reset not defined 
+    de_pin: 18
+    hsync_pin: 16
+    vsync_pin: 17
+    pclk_pin: 21
+    init_sequence: 
+      - 1
+      - [0xFF, 0x77, 0x01, 0x00, 0x00, 0x10] # CMD2_BKSEL_BK0
+      - [0xCD, 0x00] # disable MDT flag
+    pclk_frequency: 12MHz
+    pclk_inverted: false
+    data_pins:
+      red:
+        - 11         # R1
+        - 12         # R2
+        - 13         # R3
+        - 14         # R4
+        - 0          # R5
+      green:
+        - 8          # G0
+        - 20         # G1
+        - 3          # G2
+        - 46         # G3
+        - 9          # G4
+        - 10         # G5 
+      blue:
+        - 4          # B1
+        - 5          # B2
+        - 6          # B3
+        - 7          # B4
+        - 15         # B5
+
+i2c:
+  - id: bus_a
+    sda: GPIO19
+    scl: GPIO45
+#     frequency: 100kHz
+
+touchscreen:
+  platform: gt911
+  transform:
+    mirror_x: false
+    mirror_y: false
+  id: my_touchscreen
+  display: my_display
+
+  on_touch:
+    - logger.log:
+          format: Touch at (%d, %d)
+          args: [touch.x, touch.y]
+    - lambda: |-
+          ESP_LOGI("cal", "x=%d, y=%d, x_raw=%d, y_raw=%0d",
+              touch.x,
+              touch.y,
+              touch.x_raw,
+              touch.y_raw
+              );
+
+  on_release:
+    then:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - logger.log: "LVGL resuming"
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - light.turn_on: backlight
+
+font:
+  - file: "fonts/Roboto-Regular.ttf"
+    id: roboto_32
+    size: 32
+    bpp: 8
+    extras:
+      - file: "fonts/materialdesignicons-webfont.ttf"
+        glyphs: [
+          "\U000F050F",  # thermometer
+          "\U000F0238",  # fire
+          "\U000F0717",  # snowflake
+          "\U000F0425",  # power-off
+          "\U000F0075",  # auto
+          "\U000F0493"   # settings
+        ]
+  
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: material_icons_24
+    size: 24
+    bpp: 8
+    glyphs: [
+      "\U000F050F",  # thermometer
+      "\U000F0238",  # fire
+      "\U000F1722",  # fire-off
+      "\U000F0717",  # snowflake
+      "\U000F14E3",  # snowflake-off
+      "\U000F0425",  # power-off
+      "\U000F0075",  # auto
+      "\U000F1A79"   # sun/snowflake
+    ]
+          
+  - file:
+      type: gfonts
+      family: Roboto
+    id: font_roboto_72
+    size: 72
+    bpp: 8
+  - file:
+      type: gfonts
+      family: Roboto
+    id: roboto_64
+    size: 64
+    bpp: 8
+  - file:
+      type: gfonts
+      family: Roboto
+    id: roboto_26
+    size: 26
+    bpp: 8
+
+image:
+  - file: "images/heat_glow.png"
+    id: heating_glow
+    transparency: alpha_channel
+    type: RGB565
+  - file: "images/cool_glow.png"
+    id: cooling_glow
+    transparency: alpha_channel
+    type: RGB565
+
+# Use LVGL component for UI interface configuration
+lvgl:
+  
+  color_depth: 16
+  disp_bg_color: !lambda return BLACK;
+  text_color: !lambda return WHITE;
+  
+  pages:
+
+    - id: thermostat_page
+
+      widgets:
+        # Page background
+        - obj:
+            align: CENTER
+            width: 480
+            height: 480
+            bg_color: !lambda return BLACK;
+            border_width: 0
+            radius: 0
+        - obj:
+            id: glow_obj
+            align: CENTER
+            width: 400
+            height: 400
+            bg_color: 0
+            border_width: 0
+            radius: 0
+            hidden: true
+        
+        # Cooling arc (blue)
+        - arc:
+            id: cooling_arc
+            align: CENTER
+            y: 0
+            width: 420
+            height: 420
+            arc_color: !lambda return DARK_BLUE;
+            arc_width: 32
+            value: 300
+            min_value: 100
+            max_value: 400
+            adjustable: true
+            indicator:
+              arc_color: !lambda return DARK_GRAY;
+              arc_width: 32
+            knob:
+              bg_color: !lambda return DARK_BLUE;
+              pad_all: 0
+              border_width: 4
+              border_color: !lambda return DARK_BLUE;
+
+        # Heating arc (red/orange)
+        - arc:
+            id: heating_arc
+            align: CENTER
+            y: 0
+            width: 420
+            height: 420
+            arc_color: !lambda return DARK_GRAY;
+            arc_opa: 0
+            arc_width: 32
+            value: 200
+            min_value: 100
+            max_value: 400
+            adjustable: true
+            indicator:
+              arc_color: !lambda return DARK_ORANGE;
+              arc_width: 32
+            knob:
+              bg_color: !lambda return DARK_ORANGE;
+              pad_all: 0
+              border_width: 4
+              border_color: !lambda return DARK_ORANGE;
+
+        # Foregroung current temp arc
+        - arc:
+            id: dual_current_temp_arc
+            align: CENTER
+            y: 0
+            width: 420
+            height: 420 
+            arc_color: !lambda return DARK_BLUE;
+            arc_opa: 0
+            arc_width: 32
+            value: 250
+            min_value: 100
+            max_value: 400
+            adjustable: true
+            indicator:
+              arc_color: !lambda return DARK_BLUE;
+              arc_opa: 0
+              arc_width: 32
+            knob:
+              bg_color: !lambda return BLACK;
+              bg_opa: 1
+              pad_all: -10
+              border_width: 10
+              border_color: !lambda return BRIGHT_BLUE;
+              border_opa: 0
+          
+        # Foregroung adjustment arc
+        - arc:
+            id: dual_setpoint_arc
+            align: CENTER
+            y: 0
+            adjustable: true
+            value: 250
+            min_value: 100
+            max_value: 400
+            width: 420
+            height: 420
+            arc_width: 32
+            arc_color: !lambda return DARK_GRAY;
+            arc_opa: 0
+            change_rate: 180
+            indicator:
+              arc_color: !lambda return BRIGHT_ORANGE;
+              arc_opa: 0
+              arc_width: 32
+            knob:
+              bg_color: !lambda return WHITE;
+              bg_opa: 0
+
+            on_value:
+              then:
+                # Set flag to indicate update is coming from LVGL
+                - lambda: 'id(updating_from_lvgl) = true;'
+                
+                # Update the target temperature based on the selected button
+                - if:
+                    condition:
+                      - lambda: 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
+                    then:
+                      - climate.control:
+                          id: thermostat_living
+                          target_temperature_low: !lambda 'return x / 10.0;'
+
+                - if:
+                    condition:
+                      - lambda: 'return lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);'
+                    then:
+                      - climate.control:
+                          id: thermostat_living
+                          target_temperature_high: !lambda 'return x / 10.0;'
+
+                # Lambda for updating colors and styles of arcs and their indicators
+                - lambda: |-
+                    // Helper functions
+                    auto set_arc_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
+                      lv_color_t current_color = lv_obj_get_style_arc_color(obj, part);
+                      if (current_color.full != new_color.full) {
+                        lv_obj_set_style_arc_color(obj, new_color, part);
+                      }
+                    };
+
+                    auto set_border_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
+                      lv_color_t current_color = lv_obj_get_style_border_color(obj, part);
+                      if (current_color.full != new_color.full) {
+                        lv_obj_set_style_border_color(obj, new_color, part);
+                      }
+                    };
+
+                    auto set_bg_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
+                      lv_color_t current_color = lv_obj_get_style_bg_color(obj, part);
+                      if (current_color.full != new_color.full) {
+                        lv_obj_set_style_bg_color(obj, new_color, part);
+                      }
+                    };
+
+                    auto set_opa_if_different = [](lv_obj_t* obj, lv_opa_t new_opa, lv_part_t part, lv_style_prop_t prop) {
+                      lv_opa_t current_opa = (prop == LV_STYLE_ARC_OPA) ? lv_obj_get_style_arc_opa(obj, part) : lv_obj_get_style_border_opa(obj, part);
+                      if (current_opa != new_opa) {
+                        if (prop == LV_STYLE_ARC_OPA) {
+                          lv_obj_set_style_arc_opa(obj, new_opa, part);
+                        } else {
+                          lv_obj_set_style_border_opa(obj, new_opa, part);
+                        }
+                      }
+                    };
+
+                    auto set_pad_if_different = [](lv_obj_t* obj, lv_coord_t pad_value, lv_part_t part) {
+                      lv_coord_t current_pad_top = lv_obj_get_style_pad_top(obj, part);
+                      lv_coord_t current_pad_bottom = lv_obj_get_style_pad_bottom(obj, part);
+                      lv_coord_t current_pad_left = lv_obj_get_style_pad_left(obj, part);
+                      lv_coord_t current_pad_right = lv_obj_get_style_pad_right(obj, part);
+
+                      if (current_pad_top != pad_value || current_pad_bottom != pad_value || current_pad_left != pad_value || current_pad_right != pad_value) {
+                        lv_obj_set_style_pad_all(obj, pad_value, part);
+                      }
+                    };
+
+                    // Retrieve current values and arc mode
+                    int dual_value = x;
+                    int cooling_value = lv_arc_get_value(id(cooling_arc));
+                    int heating_value = lv_arc_get_value(id(heating_arc));
+                    int actual_value = lv_arc_get_value(id(dual_current_temp_arc));
+                    int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
+                    int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
+                    lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
+
+                    int normal_value = (current_mode == LV_ARC_MODE_REVERSE) ? (max_val + min_val - actual_value) : actual_value;
+
+                    bool heat_checked = lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);
+                    bool cool_checked = lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);
+
+                    // Updates arc values based on the selected button
+                    if (heat_checked) {
+                      lv_arc_set_value(id(heating_arc), dual_value);
+                      // Maintain minimum distance
+                      if (cooling_value < dual_value + 20) {
+                        lv_arc_set_value(id(cooling_arc), dual_value + 20);
+                        // Also update the climate for cooling
+                        id(thermostat_living).target_temperature_high = (dual_value + 20) / 10.0;
+                      }
+                    } else if (cool_checked) {
+                      lv_arc_set_value(id(cooling_arc), dual_value);
+                      // Maintain minimum distance
+                      if (heating_value > dual_value - 20) {
+                        lv_arc_set_value(id(heating_arc), dual_value - 20);
+                        // Also update the climate for heating
+                        id(thermostat_living).target_temperature_low = (dual_value - 20) / 10.0;
+                      }
+                    }
+
+                    // Update values after changes
+                    cooling_value = lv_arc_get_value(id(cooling_arc));
+                    heating_value = lv_arc_get_value(id(heating_arc));
+
+                    // Apply styles based on current conditions
+                    if (heating_value > normal_value) {
+                      if (current_mode != LV_ARC_MODE_NORMAL) {
+                        lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
+                        lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
+                      }
+                      set_arc_color_if_different(id(dual_current_temp_arc), DARK_ORANGE, LV_PART_INDICATOR);
+                      set_arc_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_INDICATOR);
+                      set_arc_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
+                      set_border_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+
+                      set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
+                      set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+
+                    } else if (cooling_value < normal_value) {
+                      if (current_mode != LV_ARC_MODE_REVERSE) {
+                        lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_REVERSE);
+                        lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
+                      }
+                      set_arc_color_if_different(id(dual_current_temp_arc), DARK_BLUE, LV_PART_INDICATOR);
+                      set_arc_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_MAIN);
+                      set_arc_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
+                      set_border_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+
+                      set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
+                      set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_BLUE, LV_PART_KNOB);
+                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+
+                    } else {
+                      if (current_mode != LV_ARC_MODE_NORMAL) {
+                        lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
+                        lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
+                      }
+                      set_arc_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
+                      set_border_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+
+                      set_arc_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
+                      set_border_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+
+                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+                      set_pad_if_different(id(dual_current_temp_arc), -10, LV_PART_KNOB);
+                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+
+                      if (heat_checked) {
+                        set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+                      }
+                      else if (cool_checked) {
+                        set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+                      }
+                    }
+                
+                # Reset flag after processing (using a delay to ensure climate update is processed)
+                - delay: 100ms
+                - lambda: 'id(updating_from_lvgl) = false;'
+            
+        - label:
+            id: dual_action_label
+            align: CENTER
+            y: -90
+            text_font: montserrat_20
+            text: "--"
+            text_color: !lambda return BRIGHT_ORANGE;
+        - label:
+            id: heat_setpoint_label
+            align: CENTER
+            text: "--"
+            x: -90
+            y: -10
+            text_font: font_roboto_72
+            text_color: !lambda return NEUTRAL_GRAY;
+        - label:
+            id: heat_decimal_label
+            align: CENTER
+            text: ".-"
+            x: -33
+            y: 4
+            text_font: roboto_32
+            text_color: !lambda return NEUTRAL_GRAY;
+        - label:
+            id: heat_celsius_label
+            align: CENTER
+            text: "°C"
+            x: -35
+            y: -27
+            text_font: roboto_26
+            text_color: !lambda return NEUTRAL_GRAY;
+        - label:
+            id: cool_setpoint_label
+            align: CENTER
+            text: "--"
+            x: 60
+            y: -10
+            text_font: font_roboto_72
+            text_color: !lambda return NEUTRAL_GRAY;
+        - label:
+            id: cool_decimal_label
+            align: CENTER
+            text: ".-"
+            x: 117
+            y: 4
+            text_font: roboto_32
+            text_color: !lambda return NEUTRAL_GRAY;
+        - label:
+            id: cool_celsius_label
+            align: CENTER
+            text: "°C"
+            x: 115
+            y: -27
+            text_font: roboto_26
+            text_color: !lambda return NEUTRAL_GRAY;
+        - label:
+            id: dual_temperature_label
+            align: CENTER
+            text: "--.-°"
+            text_font: roboto_32 #montserrat_32
+            text_color: !lambda return WHITE;
+            y: 70
+            x: 15
+        - label:
+            id: thermometer_sign_label
+            align: CENTER
+            text: "\U000F050F"
+            text_font: roboto_32
+            text_color: !lambda return WHITE;
+            y: 74
+            x: -40
+
+        # Plus button - Increase temperature with 0.1 step
+        - button: 
+            id: temp_plus_btn
+            align: CENTER
+            x: 50
+            y: 145
+            width: 60
+            height: 60
+            checkable: false
+            radius: 30
+            bg_opa: TRANSP
+            border_width: 2
+            border_color: !lambda return NEUTRAL_GRAY;
+            shadow_opa: 0
+            on_click: 
+              - lambda: |-
+                  id(updating_from_lvgl) = true;
+
+                  float step = 0.1f;
+                  bool heat_checked = lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);
+                  bool cool_checked = lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);
+
+                  if (heat_checked) {
+                    float current_low = id(thermostat_living).target_temperature_low;
+                    float new_low = current_low + step;
+
+                    // Menține diferența minimă de 2° între low și high
+                    if (new_low + 2.0 <= id(thermostat_living).target_temperature_high) {
+                      id(thermostat_living).target_temperature_low = new_low;
+                      // Actualizează climate
+                      auto call = id(thermostat_living).make_call();
+                      call.set_target_temperature_low(new_low);
+                      call.perform();
+
+                      // Actualizează arcul dual_setpoint_arc la valoarea low * 10 (pentru consistență cu arc)
+                      lv_arc_set_value(id(dual_setpoint_arc), int(new_low * 10));
+                    }
+                  }
+                  else if (cool_checked) {
+                    float current_high = id(thermostat_living).target_temperature_high;
+                    float new_high = current_high + step;
+
+                    // Limita superioară max 40
+                    if (new_high <= 40.0f) {
+                      id(thermostat_living).target_temperature_high = new_high;
+                      // Actualizează climate
+                      auto call = id(thermostat_living).make_call();
+                      call.set_target_temperature_high(new_high);
+                      call.perform();
+
+                      // Actualizează arcul dual_setpoint_arc la valoarea high * 10
+                      lv_arc_set_value(id(dual_setpoint_arc), int(new_high * 10));
+                    }
+                  }
+
+                  id(updating_from_lvgl) = false;
+            widgets: 
+              - label: 
+                  width: 100%
+                  height: 100%
+                  text: "+"
+                  align: CENTER
+                  text_align: CENTER
+                  text_font: roboto_32
+                  text_color: !lambda return NEUTRAL_GRAY;
+
+        # Minus button - Decrease temperature with 0.1 step
+        - button:
+            id: temp_minus_btn
+            align: CENTER
+            x: -50
+            y: 145
+            width: 60
+            height: 60
+            checkable: false
+            radius: 30
+            bg_opa: TRANSP
+            border_width: 2
+            border_color: !lambda return NEUTRAL_GRAY;
+            shadow_opa: 0
+            on_click:
+              - lambda: |-
+                  id(updating_from_lvgl) = true;
+
+                  float step = 0.1f;
+                  bool heat_checked = lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);
+                  bool cool_checked = lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);
+
+                  if (heat_checked) {
+                    float current_low = id(thermostat_living).target_temperature_low;
+                    float new_low = current_low - step;
+
+                    // Limita minimă low 10.0
+                    if (new_low >= 10.0f) {
+                      // Menține diferența minimă de 2° între low și high
+                      if (new_low + 2.0 <= id(thermostat_living).target_temperature_high) {
+                        id(thermostat_living).target_temperature_low = new_low;
+                        // Actualizează climate
+                        auto call = id(thermostat_living).make_call();
+                        call.set_target_temperature_low(new_low);
+                        call.perform();
+
+                        lv_arc_set_value(id(dual_setpoint_arc), int(new_low * 10));
+                      }
+                    }
+                  }
+                  else if (cool_checked) {
+                    float current_high = id(thermostat_living).target_temperature_high;
+                    float new_high = current_high - step;
+
+                    // Limita minimă high este low + 2
+                    if (new_high >= id(thermostat_living).target_temperature_low + 2.0) {
+                      id(thermostat_living).target_temperature_high = new_high;
+                      // Actualizează climate
+                      auto call = id(thermostat_living).make_call();
+                      call.set_target_temperature_high(new_high);
+                      call.perform();
+
+                      lv_arc_set_value(id(dual_setpoint_arc), int(new_high * 10));
+                    }
+                  }
+
+                  id(updating_from_lvgl) = false;
+            widgets:
+              - label:
+                  width: 100%
+                  height: 100%
+                  text: "−"
+                  align: CENTER
+                  text_align: CENTER
+                  text_font: roboto_32
+                  text_color: !lambda return NEUTRAL_GRAY;
+
+        - button:
+            id: heat_sel_button
+            align: CENTER
+            x: -75
+            y: -10
+            width: 110
+            height: 65
+            checkable: true
+            bg_opa: 0
+            radius: 0
+            border_width: 0
+            border_color: !lambda 'return WHITE;'
+            shadow_width: 0
+            pressed:
+              bg_color: !lambda 'return BRIGHT_ORANGE;'
+              bg_opa: 0
+            checked:
+              bg_color: !lambda 'return BRIGHT_ORANGE;'
+              bg_opa: 0
+            on_click:
+              - lambda: |-
+                  // Enable heat_sel_button, disable cool_sel_button only if needed
+                  if (!lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED))
+                    lv_obj_add_state(id(heat_sel_button), LV_STATE_CHECKED);
+                  if (lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED))
+                    lv_obj_clear_state(id(cool_sel_button), LV_STATE_CHECKED);
+
+                  // Calculate normal_value for comparisons
+                  int cooling_value = lv_arc_get_value(id(cooling_arc));
+                  int actual_value = lv_arc_get_value(id(dual_current_temp_arc));
+                  int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
+                  int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
+                  lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
+                  int normal_value = (current_mode == LV_ARC_MODE_REVERSE) ? (max_val + min_val - actual_value) : actual_value;
+
+                  // Set dual_setpoint_arc to the value of heating_arc
+                  lv_arc_set_value(id(dual_setpoint_arc), lv_arc_get_value(id(heating_arc)));
+
+                  // Configure heating and cooling knob colors
+                  lv_obj_set_style_bg_color(id(heating_arc), WHITE, LV_PART_KNOB);
+
+                  if (cooling_value < normal_value) {
+                    lv_obj_set_style_bg_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+                    lv_obj_set_style_border_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+                  } else {
+                    lv_obj_set_style_bg_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+                    lv_obj_set_style_border_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+                  }
+
+                  // Updates the styles of heat/cool buttons and labels
+                  lv_obj_set_style_border_color(id(temp_plus_btn), DARK_ORANGE, LV_STATE_DEFAULT);
+                  lv_obj_set_style_border_color(id(temp_minus_btn), DARK_ORANGE, LV_STATE_DEFAULT);
+
+                  lv_obj_set_style_text_color(id(heat_setpoint_label), WHITE, LV_STATE_DEFAULT);
+                  lv_obj_set_style_text_color(id(heat_decimal_label), WHITE, LV_STATE_DEFAULT);
+                  lv_obj_set_style_text_color(id(heat_celsius_label), WHITE, LV_STATE_DEFAULT);
+
+                  lv_obj_set_style_text_color(id(cool_setpoint_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+                  lv_obj_set_style_text_color(id(cool_decimal_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+                  lv_obj_set_style_text_color(id(cool_celsius_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+
+        - button:
+            id: cool_sel_button
+            align: CENTER
+            x: 75
+            y: -10
+            width: 110
+            height: 65
+            checkable: true
+            bg_opa: 0
+            radius: 0
+            border_width: 0
+            border_color: !lambda 'return WHITE;'
+            shadow_width: 0
+            pressed:
+              bg_color: !lambda 'return BRIGHT_BLUE;'
+              bg_opa: 0
+            checked:
+              bg_color: !lambda 'return BRIGHT_BLUE;'
+              bg_opa: 0
+            on_click:
+              - lambda: |-
+                  // Enable cool_sel_button, disable heat_sel_button only if needed
+                  if (!lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED))
+                    lv_obj_add_state(id(cool_sel_button), LV_STATE_CHECKED);
+                  if (lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED))
+                    lv_obj_clear_state(id(heat_sel_button), LV_STATE_CHECKED);
+
+                  int heating_value = lv_arc_get_value(id(heating_arc));
+                  int actual_value = lv_arc_get_value(id(dual_current_temp_arc));
+                  int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
+                  int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
+                  lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
+                  int normal_value = (current_mode == LV_ARC_MODE_REVERSE) ? (max_val + min_val - actual_value) : actual_value;
+
+                  lv_arc_set_value(id(dual_setpoint_arc), lv_arc_get_value(id(cooling_arc)));
+
+                  lv_obj_set_style_bg_color(id(cooling_arc), WHITE, LV_PART_KNOB);
+
+                  if (heating_value > normal_value) {
+                    lv_obj_set_style_bg_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+                    lv_obj_set_style_border_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+                  } else {
+                    lv_obj_set_style_bg_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+                    lv_obj_set_style_border_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+                  }
+
+                  lv_obj_set_style_border_color(id(temp_plus_btn), DARK_BLUE, LV_STATE_DEFAULT);
+                  lv_obj_set_style_border_color(id(temp_minus_btn), DARK_BLUE, LV_STATE_DEFAULT);
+
+                  lv_obj_set_style_text_color(id(heat_setpoint_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+                  lv_obj_set_style_text_color(id(heat_decimal_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+                  lv_obj_set_style_text_color(id(heat_celsius_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+
+                  lv_obj_set_style_text_color(id(cool_setpoint_label), WHITE, LV_STATE_DEFAULT);
+                  lv_obj_set_style_text_color(id(cool_decimal_label), WHITE, LV_STATE_DEFAULT);
+                  lv_obj_set_style_text_color(id(cool_celsius_label), WHITE, LV_STATE_DEFAULT);
+
+        - button:
+            id: heat_btn
+            align: CENTER
+            x: 159
+            y: 210
+            width: 100
+            checkable: true
+            bg_color: !lambda return DARK_GRAY;
+            shadow_width: 0
+            pressed:
+              bg_color: !lambda return BRIGHT_ORANGE;
+            checked:
+              bg_color: !lambda return BRIGHT_ORANGE;
+            on_click:
+              - climate.control:
+                  id: thermostat_living
+                  mode: "HEAT"
+              - lambda: |-
+                  id(update_from_button) = true;
+                  lv_obj_add_state(id(heat_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(auto_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(cool_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(off_btn), LV_STATE_CHECKED);
+                  delay(80);
+                  id(update_from_button) = false;
+            widgets:
+              - label:
+                  align: CENTER
+                  text_font: material_icons_24
+                  text: "\U000F0238"
+
+        - button:
+            id: auto_btn
+            align: CENTER
+            x: -53
+            y: 210
+            width: 100
+            checkable: true
+            bg_color: !lambda return DARK_GRAY;
+            shadow_width: 0
+            pressed:
+              bg_color: !lambda return AMBER;
+            checked:
+              bg_color: !lambda return AMBER;
+            on_click:
+              - climate.control:
+                  id: thermostat_living
+                  mode: "HEAT_COOL"
+              - lambda: |-
+                  id(update_from_button) = true;
+                  lv_obj_add_state(id(auto_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(heat_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(cool_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(off_btn), LV_STATE_CHECKED);
+                  delay(80);
+                  id(update_from_button) = false;
+            widgets:
+              - label:
+                  align: CENTER
+                  text_font: material_icons_24
+                  text: "\U000F1A79"
+
+        - button:
+            id: cool_btn
+            align: CENTER
+            x: 53
+            y: 210
+            width: 100
+            checkable: true
+            bg_color: !lambda return DARK_GRAY;
+            shadow_width: 0
+            pressed:
+              bg_color: !lambda return BRIGHT_BLUE;
+            checked:
+              bg_color: !lambda return BRIGHT_BLUE;
+            on_click:
+              - climate.control:
+                  id: thermostat_living
+                  mode: "COOL"
+              - lambda: |-
+                  id(update_from_button) = true;
+                  lv_obj_add_state(id(cool_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(heat_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(auto_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(off_btn), LV_STATE_CHECKED);
+                  delay(80);
+                  id(update_from_button) = false;
+            widgets:
+              - label:
+                  align: CENTER
+                  text_font: material_icons_24
+                  text: "\U000F0717"
+
+        - button:
+            id: off_btn
+            align: CENTER
+            x: -159
+            y: 210
+            width: 100
+            checkable: true
+            bg_color: !lambda return DARK_GRAY;
+            shadow_width: 0
+            pressed:
+              bg_color: !lambda return AMBER;
+            checked:
+              bg_color: !lambda return AMBER;
+            on_click:
+              - climate.control:
+                  id: thermostat_living
+                  mode: "OFF"
+              - lambda: |-
+                  id(update_from_button) = true;
+                  lv_obj_add_state(id(off_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(heat_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(auto_btn), LV_STATE_CHECKED);
+                  lv_obj_clear_state(id(cool_btn), LV_STATE_CHECKED);
+                  delay(80);
+                  id(update_from_button) = false;
+            widgets:
+              - label:
+                  align: CENTER
+                  text_font: material_icons_24
+                  text: "\U000F0425"
+                  
+        - button:
+             id: presets_btn
+             x: 400
+             y: 30
+             width: 60
+             height: 60
+             bg_color: !lambda return DARK_GRAY;
+             bg_opa: 0
+             shadow_width: 0
+             widgets:
+               - label:
+                  align: CENTER
+                  text_font: roboto_32
+                  text: "\U000F0493"
+                  text_color: !lambda return DARK_GRAY;
+             on_click:
+               - script.execute: show_presets_page
+                  
+    - id: presets_page
+      widgets: 
+        - obj: 
+            id: presets_container
+            x: 0
+            y: 0
+            width: 480
+            height: 480
+            bg_color: !lambda return BLACK;
+            bg_opa: 1
+            border_width: 0
+            pad_all: 10
+            radius: 0
+            widgets: 
+              - label: 
+                  id: presets_title
+                  x: 0
+                  y: 0
+                  width: 460
+                  height: 35
+                  text: "PRESET SETTINGS"
+                  text_align: CENTER
+                  text_font: montserrat_16
+                  text_color: !lambda return LIGHT_GRAY;
+                  bg_color: !lambda return DARK_GRAY;
+                  bg_opa: 1
+                  radius: 8
+                  pad_all: 8
+                  
+              - switch: 
+                  id: preset_enable_switch
+                  x: 25
+                  y: 45
+                  width: 70
+                  height: 35
+                  bg_color: 0x666666
+                  checked: 
+                    bg_color: 0x00AA00
+                  on_click: 
+                    - lambda: |-
+                        bool new_state = lv_obj_has_state(id(preset_enable_switch), LV_STATE_CHECKED);
+                        id(presets_enabled) = new_state;
+                        if (new_state) {
+                          id(preset_schedule_switch).turn_on();
+                        } else {
+                          id(preset_schedule_switch).turn_off();
+                        }
+                        
+              - label: 
+                  id: preset_enable_label
+                  x: 105
+                  y: 52
+                  text: "Enable Schedule"
+                  text_font: montserrat_16
+                  text_color: !lambda return WHITE;
+                  
+              - obj: 
+                  id: presets_scroll
+                  x: 0
+                  y: 95
+                  width: 460
+                  height: 300
+                  bg_color: !lambda return BLACK;
+                  bg_opa: 1
+                  scrollbar_mode: auto
+                  layout:
+                    type: flex
+                    flex_flow: COLUMN
+                    flex_align_main: START
+                  pad_all: 5
+                  widgets: 
+                    # HOME PRESET SECTION
+                    - obj: 
+                        id: home_preset_section
+                        width: 440
+                        height: 260
+                        bg_color: !lambda return DARK_GRAY;
+                        bg_opa: 1
+                        border_color: 0x00AA00  # GREEN accent
+                        border_width: 2
+                        pad_all: 10
+                        radius: 10
+                        widgets: 
+                          - label: 
+                              text: "HOME PRESET"
+                              x: 5
+                              y: 0
+                              text_font: montserrat_18
+                              text_color: 0x00AA00  # GREEN
+                              
+                          # Low Temperature Section
+                          - label: 
+                              text: "Low:"
+                              x: 0
+                              y: 35
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_ORANGE;
+                              
+                          - slider:
+                              id: home_low_slider
+                              x: 50
+                              y: 35
+                              width: 180
+                              height: 25
+                              min_value: 100
+                              max_value: 300
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              knob:
+                                bg_color: !lambda return WHITE;
+                                pad_all: 0
+                                border_width: 2
+                                border_color: !lambda return BRIGHT_ORANGE;
+                              indicator:
+                                bg_color: !lambda return BRIGHT_ORANGE;
+                              on_value:
+                                - lambda: |-
+                                    // Round value x to nearest multiple of 5
+                                    int stepped_value = ((int)(x + 2.5) / 5) * 5;
+                                    float temp = stepped_value / 10.0;
+                                    ESP_LOGI("slider", "Home low temp changed to: %.1f", temp);
+                                    id(preset_home_temp_low) = temp;
+                                    id(home_preset_low_temp).publish_state(temp);
+                                    id(update_preset_from_spinbox).execute();
+                                    char buf[32];
+                                    snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                    lv_label_set_text(id(home_low_temp_label), buf);
+                                    
+                          - label:
+                              id: home_low_temp_label
+                              text: "20.0°C"
+                              x: 240
+                              y: 35
+                              width: 60
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_ORANGE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 3
+                              
+                          - button:
+                              id: home_low_minus_btn
+                              x: 320
+                              y: 30
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_ORANGE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(home_low_slider));
+                                    int new_val = current_val - 1;
+                                    if (new_val >= 100) {
+                                      lv_slider_set_value(id(home_low_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_home_temp_low) = temp;
+                                      id(home_preset_low_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(home_low_temp_label), buf);
+                                    }
+                                    
+                          - button:
+                              id: home_low_plus_btn
+                              x: 370
+                              y: 30
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_ORANGE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(home_low_slider));
+                                    int new_val = current_val + 1;
+                                    if (new_val <= 300) {
+                                      lv_slider_set_value(id(home_low_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_home_temp_low) = temp;
+                                      id(home_preset_low_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      //lv_label_set_text_fmt(id(home_low_temp_label), "%.1f°C", temp);
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(home_low_temp_label), buf);
+                                    }
+                                    
+                          # High Temperature Section
+                          - label:
+                              text: "High:"
+                              x: 0
+                              y: 75
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_BLUE;
+                              
+                          - slider:
+                              id: home_high_slider
+                              x: 50
+                              y: 75
+                              width: 180
+                              height: 25
+                              min_value: 150
+                              max_value: 350
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              knob:
+                                bg_color: !lambda return WHITE;
+                                pad_all: 0
+                                border_width: 2
+                                border_color: !lambda return BRIGHT_BLUE;
+                              indicator:
+                                bg_color: !lambda return BRIGHT_BLUE;
+                              on_value:
+                                - lambda: |-
+                                    // Round value x to nearest multiple of 5
+                                    int stepped_value = ((int)(x + 2.5) / 5) * 5;
+                                    float temp = stepped_value / 10.0;
+                                    ESP_LOGI("slider", "Home high temp changed to: %.1f", temp);
+                                    id(preset_home_temp_high) = temp;
+                                    id(home_preset_high_temp).publish_state(temp);
+                                    id(update_preset_from_spinbox).execute();
+                                    char buf[32];
+                                    snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                    lv_label_set_text(id(home_high_temp_label), buf);
+                                    
+                          - label:
+                              id: home_high_temp_label
+                              text: "24.0°C"
+                              x: 240
+                              y: 75
+                              width: 60
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_BLUE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 3
+                              
+                          - button:
+                              id: home_high_minus_btn
+                              x: 320
+                              y: 70
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_BLUE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(home_high_slider));
+                                    int new_val = current_val - 1;
+                                    if (new_val >= 150) {
+                                      lv_slider_set_value(id(home_high_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_home_temp_high) = temp;
+                                      id(home_preset_high_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(home_high_temp_label), buf);
+                                    }
+                                    
+                          - button:
+                              id: home_high_plus_btn
+                              x: 370
+                              y: 70
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_BLUE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(home_high_slider));
+                                    int new_val = current_val + 1;
+                                    if (new_val <= 350) {
+                                      lv_slider_set_value(id(home_high_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_home_temp_high) = temp;
+                                      id(home_preset_high_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(home_high_temp_label), buf);
+                                    }
+                                    
+                          # Time Section
+                          - label:
+                              text: "Start Time:"
+                              x: 0
+                              y: 165
+                              text_font: montserrat_14
+                              text_color: !lambda return NEUTRAL_GRAY;
+                              
+                          - label:
+                              id: home_time_display
+                              text: "07:00"
+                              x: 90
+                              y: 165
+                              width: 80
+                              text_align: CENTER
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 5
+                              
+                          - label:
+                              id: home_hour_label
+                              text: "07"
+                              x: 190
+                              y: 165
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+                              
+                          - button:
+                              id: home_hour_minus_btn
+                              x: 190
+                              y: 195
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_home_hour);
+                                    hour = (hour == 0) ? 23 : hour - 1;
+                                    id(preset_home_hour) = hour;
+                                    id(home_preset_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(home_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(home_time_display), "%02d:%02d", hour, id(preset_home_minute));
+                                    
+                          - button:
+                              id: home_hour_plus_btn
+                              x: 190
+                              y: 120
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_home_hour);
+                                    hour = (hour == 23) ? 0 : hour + 1;
+                                    id(preset_home_hour) = hour;
+                                    id(home_preset_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(home_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(home_time_display), "%02d:%02d", hour, id(preset_home_minute));         
+                          - label:
+                              text: ":"
+                              x: 240
+                              y: 165
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;
+                          - label:
+                              id: home_minute_label
+                              text: "00"
+                              x: 255
+                              y: 165
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+                              
+                          - button:
+                              id: home_minute_minus_btn
+                              x: 255
+                              y: 195
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_home_minute);
+                                    minute = (minute == 0) ? 59 : minute - 1;
+                                    id(preset_home_minute) = minute;
+                                    id(home_preset_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(home_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(home_time_display), "%02d:%02d", id(preset_home_hour), minute);
+                                    
+                          - button:
+                              id: home_minute_plus_btn
+                              x: 255
+                              y: 120
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_home_minute);
+                                    minute = (minute == 59) ? 0 : minute + 1;
+                                    id(preset_home_minute) = minute;
+                                    id(home_preset_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(home_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(home_time_display), "%02d:%02d", id(preset_home_hour), minute);
+
+                    # RETURN HOME SECTION
+                    - obj:
+                        id: return_home_section
+                        width: 440
+                        height: 145
+                        bg_color: !lambda return DARK_GRAY;
+                        bg_opa: 1
+                        border_color: 0x00AA00  # GREEN accent
+                        border_width: 2
+                        pad_all: 15
+                        radius: 10
+                        widgets:
+                          - label:
+                              text: "RETURN HOME"
+                              x: 5
+                              y: 0
+                              text_font: montserrat_18
+                              text_color: 0x00AA00  # GREEN
+                              
+                          # Time Section
+                          - label:
+                              text: "Return Time:"
+                              x: 0
+                              y: 45
+                              text_font: montserrat_14
+                              text_color: !lambda return NEUTRAL_GRAY;
+                              
+                          - label:
+                              id: return_time_display
+                              text: "17:00"
+                              x: 90
+                              y: 45
+                              width: 80
+                              text_align: CENTER
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 5
+                              
+                          - label:
+                              id: return_hour_label
+                              text: "17"
+                              x: 190
+                              y: 45
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+                              
+                          - button:
+                              id: return_hour_minus_btn
+                              x: 190
+                              y: 75
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_home_return_hour);
+                                    hour = (hour == 0) ? 23 : hour - 1;
+                                    id(preset_home_return_hour) = hour;
+                                    id(return_home_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(return_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(return_time_display), "%02d:%02d", hour, id(preset_home_return_minute));
+                                    
+                          - button:
+                              id: return_hour_plus_btn
+                              x: 190
+                              y: 0
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_home_return_hour);
+                                    hour = (hour == 23) ? 0 : hour + 1;
+                                    id(preset_home_return_hour) = hour;
+                                    id(return_home_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(return_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(return_time_display), "%02d:%02d", hour, id(preset_home_return_minute));
+                                    
+                          - label:
+                              text: ":"
+                              x: 240
+                              y: 45
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;
+                              
+                          - label:
+                              id: return_minute_label
+                              text: "00"
+                              x: 255
+                              y: 45
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+                              
+                          - button:
+                              id: return_minute_minus_btn
+                              x: 255
+                              y: 75
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_home_return_minute);
+                                    minute = (minute == 0) ? 59 : minute - 1;
+                                    id(preset_home_return_minute) = minute;
+                                    id(return_home_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(return_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(return_time_display), "%02d:%02d", id(preset_home_return_hour), minute);
+                                    
+                          - button:
+                              id: return_minute_plus_btn
+                              x: 255
+                              y: 0
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_home_return_minute);
+                                    minute = (minute == 59) ? 0 : minute + 1;
+                                    id(preset_home_return_minute) = minute;
+                                    id(return_home_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(return_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(return_time_display), "%02d:%02d", id(preset_home_return_hour), minute);
+
+                    # WEEKEND HOME SECTION
+                    - obj:
+                        id: weekend_home_section
+                        width: 440
+                        height: 145
+                        bg_color: !lambda return DARK_GRAY;  # !lambda return DARK_GRAY;
+                        bg_opa: 1
+                        border_color: 0x00FFAA  # TEAL accent
+                        border_width: 2
+                        pad_all: 15
+                        radius: 10
+                        widgets:
+                          - label:
+                              text: "WEEKEND HOME"
+                              x: 5
+                              y: 0
+                              text_font: montserrat_18
+                              text_color: 0x00FFAA  # TEAL
+                              
+                          # Time Section
+                          - label:
+                              text: "Start Time:"
+                              x: 0
+                              y: 45
+                              text_font: montserrat_14
+                              text_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              
+                          - label:
+                              id: weekend_time_display
+                              text: "09:00"
+                              x: 90
+                              y: 45
+                              width: 80
+                              text_align: CENTER
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;  # !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 5
+                              
+                          - label:
+                              id: weekend_hour_label
+                              text: "09"
+                              x: 190
+                              y: 45
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+                              
+                          - button:
+                              id: weekend_hour_minus_btn
+                              x: 190
+                              y: 75
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_weekend_home_hour);
+                                    hour = (hour == 0) ? 23 : hour - 1;
+                                    id(preset_weekend_home_hour) = hour;
+                                    id(weekend_home_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(weekend_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(weekend_time_display), "%02d:%02d", hour, id(preset_weekend_home_minute));
+                                    
+                          - button:
+                              id: weekend_hour_plus_btn
+                              x: 190
+                              y: 0
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_weekend_home_hour);
+                                    hour = (hour == 23) ? 0 : hour + 1;
+                                    id(preset_weekend_home_hour) = hour;
+                                    id(weekend_home_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(weekend_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(weekend_time_display), "%02d:%02d", hour, id(preset_weekend_home_minute));
+                                    
+                          - label:
+                              text: ":"
+                              x: 240
+                              y: 45
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;
+                              
+                          - label:
+                              id: weekend_minute_label
+                              text: "00"
+                              x: 255
+                              y: 45
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+                              
+                          - button:
+                              id: weekend_minute_minus_btn
+                              x: 255
+                              y: 75
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_weekend_home_minute);
+                                    minute = (minute == 0) ? 59 : minute - 1;
+                                    id(preset_weekend_home_minute) = minute;
+                                    id(weekend_home_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(weekend_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(weekend_time_display), "%02d:%02d", id(preset_weekend_home_hour), minute);
+                                    
+                          - button:
+                              id: weekend_minute_plus_btn
+                              x: 255
+                              y: 0
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_weekend_home_minute);
+                                    minute = (minute == 59) ? 0 : minute + 1;
+                                    id(preset_weekend_home_minute) = minute;
+                                    id(weekend_home_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(weekend_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(weekend_time_display), "%02d:%02d", id(preset_weekend_home_hour), minute);
+
+                    # AWAY PRESET SECTION
+                    - obj:
+                        id: away_preset_section
+                        width: 440
+                        height: 260
+                        bg_color: !lambda return DARK_GRAY;
+                        bg_opa: 1
+                        border_color: !lambda return BRIGHT_ORANGE;  # ORANGE accent
+                        border_width: 2
+                        pad_all: 10
+                        radius: 10
+                        widgets:
+                          - label:
+                              text: "AWAY PRESET"
+                              x: 5
+                              y: 0
+                              text_font: montserrat_18
+                              text_color: !lambda return BRIGHT_ORANGE;  # ORANGE
+                              
+                          # Low Temperature Section
+                          - label: 
+                              text: "Low:"
+                              x: 0
+                              y: 35
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_ORANGE;
+                              
+                          - slider:
+                              id: away_low_slider
+                              x: 50
+                              y: 35
+                              width: 180
+                              height: 25
+                              min_value: 100
+                              max_value: 300
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              knob:
+                                bg_color: !lambda return WHITE;
+                                pad_all: 0
+                                border_width: 2
+                                border_color: !lambda return BRIGHT_ORANGE;
+                              indicator:
+                                bg_color: !lambda return BRIGHT_ORANGE;
+                              on_value:
+                                - lambda: |-
+                                    // Round value x to nearest multiple of 5
+                                    int stepped_value = ((int)(x + 2.5) / 5) * 5;
+                                    float temp = stepped_value / 10.0;
+                                    ESP_LOGI("slider", "Away low temp changed to: %.1f", temp);
+                                    id(preset_away_temp_low) = temp;
+                                    id(away_preset_low_temp).publish_state(temp);
+                                    id(update_preset_from_spinbox).execute();
+                                    char buf[32];
+                                    snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                    lv_label_set_text(id(away_low_temp_label), buf);
+                                    
+                          - label:
+                              id: away_low_temp_label
+                              text: "18.0°C"
+                              x: 240
+                              y: 35
+                              width: 60
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_ORANGE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 3
+                              
+                          - button:
+                              id: away_low_minus_btn
+                              x: 320
+                              y: 30
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_ORANGE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(away_low_slider));
+                                    int new_val = current_val - 1;
+                                    if (new_val >= 100) {
+                                      lv_slider_set_value(id(away_low_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_away_temp_low) = temp;
+                                      id(away_preset_low_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(away_low_temp_label), buf);
+                                    }
+                                    
+                          - button:
+                              id: away_low_plus_btn
+                              x: 370
+                              y: 30
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_ORANGE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(away_low_slider));
+                                    int new_val = current_val + 1;
+                                    if (new_val <= 300) {
+                                      lv_slider_set_value(id(away_low_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_away_temp_low) = temp;
+                                      id(away_preset_low_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      //lv_label_set_text_fmt(id(away_low_temp_label), "%.1f°C", temp);
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(away_low_temp_label), buf);
+                                    }
+                                    
+                          # High Temperature Section
+                          - label:
+                              text: "High:"
+                              x: 0
+                              y: 75
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_BLUE;
+                              
+                          - slider:
+                              id: away_high_slider
+                              x: 50
+                              y: 75
+                              width: 180
+                              height: 25
+                              min_value: 150
+                              max_value: 350
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              knob:
+                                bg_color: !lambda return WHITE;
+                                pad_all: 0
+                                border_width: 2
+                                border_color: !lambda return BRIGHT_BLUE;
+                              indicator:
+                                bg_color: !lambda return BRIGHT_BLUE;
+                              on_value:
+                                - lambda: |-
+                                    // Round value x to nearest multiple of 5
+                                    int stepped_value = ((int)(x + 2.5) / 5) * 5;
+                                    float temp = stepped_value / 10.0;
+                                    ESP_LOGI("slider", "Away high temp changed to: %.1f", temp);
+                                    id(preset_away_temp_high) = temp;
+                                    id(away_preset_high_temp).publish_state(temp);
+                                    id(update_preset_from_spinbox).execute();
+                                    char buf[32];
+                                    snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                    lv_label_set_text(id(away_high_temp_label), buf);
+                                    
+                          - label:
+                              id: away_high_temp_label
+                              text: "22.0°C"
+                              x: 240
+                              y: 75
+                              width: 60
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_BLUE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 3
+                              
+                          - button:
+                              id: away_high_minus_btn
+                              x: 320
+                              y: 70
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_BLUE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(away_high_slider));
+                                    int new_val = current_val - 1;
+                                    if (new_val >= 150) {
+                                      lv_slider_set_value(id(away_high_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_away_temp_high) = temp;
+                                      id(away_preset_high_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(away_high_temp_label), buf);
+                                    }
+                                    
+                          - button:
+                              id: away_high_plus_btn
+                              x: 370
+                              y: 70
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_BLUE;  # !lambda return BRIGHT_BLUE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(away_high_slider));
+                                    int new_val = current_val + 1;
+                                    if (new_val <= 350) {
+                                      lv_slider_set_value(id(away_high_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_away_temp_high) = temp;
+                                      id(away_preset_high_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(away_high_temp_label), buf);
+                                    }
+                                    
+                          # Time Section
+                          - label:
+                              text: "Start Time:"
+                              x: 0
+                              y: 165
+                              text_font: montserrat_14
+                              text_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              
+                          - label:
+                              id: away_time_display
+                              text: "08:30"
+                              x: 90
+                              y: 165
+                              width: 80
+                              text_align: CENTER
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;  # !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 5
+                              
+                          - label:
+                              id: away_hour_label
+                              text: "08"
+                              x: 190
+                              y: 165
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+                              
+                          - button:
+                              id: away_hour_minus_btn
+                              x: 190
+                              y: 195
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_away_hour);
+                                    hour = (hour == 0) ? 23 : hour - 1;
+                                    id(preset_away_hour) = hour;
+                                    id(away_preset_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(away_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(away_time_display), "%02d:%02d", hour, id(preset_away_minute));
+                                    
+                          - button:
+                              id: away_hour_plus_btn
+                              x: 190
+                              y: 120
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_away_hour);
+                                    hour = (hour == 23) ? 0 : hour + 1;
+                                    id(preset_away_hour) = hour;
+                                    id(away_preset_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(away_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(away_time_display), "%02d:%02d", hour, id(preset_away_minute));         
+                          - label:
+                              text: ":"
+                              x: 240
+                              y: 165
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;
+                          - label:
+                              id: away_minute_label
+                              text: "30"
+                              x: 255
+                              y: 165
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+                              
+                          - button:
+                              id: away_minute_minus_btn
+                              x: 255
+                              y: 195
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_away_minute);
+                                    minute = (minute == 0) ? 59 : minute - 1;
+                                    id(preset_away_minute) = minute;
+                                    id(away_preset_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(away_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(away_time_display), "%02d:%02d", id(preset_away_hour), minute);
+                                    
+                          - button:
+                              id: away_minute_plus_btn
+                              x: 255
+                              y: 120
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_away_minute);
+                                    minute = (minute == 59) ? 0 : minute + 1;
+                                    id(preset_away_minute) = minute;
+                                    id(away_preset_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(away_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(away_time_display), "%02d:%02d", id(preset_away_hour), minute);
+
+                    # SLEEP PRESET SECTION
+                    - obj:
+                        id: sleep_preset_section
+                        width: 440
+                        height: 260
+                        bg_color: !lambda return DARK_GRAY;
+                        bg_opa: 1
+                        border_color: 0x6600FF  # PURPLE accent
+                        border_width: 2
+                        pad_all: 10
+                        radius: 10
+                        widgets:
+                          - label:
+                              text: "SLEEP PRESET"
+                              x: 5
+                              y: 0
+                              text_font: montserrat_18
+                              text_color: 0x6600FF  # PURPLE
+
+                          # Low Temperature Section
+                          - label:
+                              text: "Low:"
+                              x: 0
+                              y: 35
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_ORANGE;
+
+                          - slider:
+                              id: sleep_low_slider
+                              x: 50
+                              y: 35
+                              width: 180
+                              height: 25
+                              min_value: 100
+                              max_value: 300
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              knob:
+                                bg_color: !lambda return WHITE;
+                                pad_all: 0
+                                border_width: 2
+                                border_color: !lambda return BRIGHT_ORANGE;
+                              indicator:
+                                bg_color: !lambda return BRIGHT_ORANGE;
+                              on_value:
+                                - lambda: |-
+                                    // Round value x to nearest multiple of 5
+                                    int stepped_value = ((int)(x + 2.5) / 5) * 5;
+                                    float temp = stepped_value / 10.0;
+                                    ESP_LOGI("slider", "Sleep low temp changed to: %.1f", temp);
+                                    id(preset_sleep_temp_low) = temp;
+                                    id(sleep_preset_low_temp).publish_state(temp);
+                                    id(update_preset_from_spinbox).execute();
+                                    char buf[32];
+                                    snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                    lv_label_set_text(id(sleep_low_temp_label), buf);
+
+                          - label:
+                              id: sleep_low_temp_label
+                              text: "16.0°C"
+                              x: 240
+                              y: 35
+                              width: 60
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_ORANGE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 3
+
+                          - button:
+                              id: sleep_low_minus_btn
+                              x: 320
+                              y: 30
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_ORANGE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(sleep_low_slider));
+                                    int new_val = current_val - 1;
+                                    if (new_val >= 100) {
+                                      lv_slider_set_value(id(sleep_low_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_sleep_temp_low) = temp;
+                                      id(sleep_preset_low_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(sleep_low_temp_label), buf);
+                                    }
+
+                          - button:
+                              id: sleep_low_plus_btn
+                              x: 370
+                              y: 30
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_ORANGE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(sleep_low_slider));
+                                    int new_val = current_val + 1;
+                                    if (new_val <= 300) {
+                                      lv_slider_set_value(id(sleep_low_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_sleep_temp_low) = temp;
+                                      id(sleep_preset_low_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      //lv_label_set_text_fmt(id(sleep_low_temp_label), "%.1f°C", temp);
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(sleep_low_temp_label), buf);
+                                    }
+
+                          # High Temperature Section
+                          - label:
+                              text: "High:"
+                              x: 0
+                              y: 75
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_BLUE;
+
+                          - slider:
+                              id: sleep_high_slider
+                              x: 50
+                              y: 75
+                              width: 180
+                              height: 25
+                              min_value: 150
+                              max_value: 350
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              knob:
+                                bg_color: !lambda return WHITE;
+                                pad_all: 0
+                                border_width: 2
+                                border_color: !lambda return BRIGHT_BLUE;
+                              indicator:
+                                bg_color: !lambda return BRIGHT_BLUE;
+                              on_value:
+                                - lambda: |-
+                                    // Round value x to nearest multiple of 5
+                                    int stepped_value = ((int)(x + 2.5) / 5) * 5;
+                                    float temp = stepped_value / 10.0;
+                                    ESP_LOGI("slider", "Sleep high temp changed to: %.1f", temp);
+                                    id(preset_sleep_temp_high) = temp;
+                                    id(sleep_preset_high_temp).publish_state(temp);
+                                    id(update_preset_from_spinbox).execute();
+                                    char buf[32];
+                                    snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                    lv_label_set_text(id(sleep_high_temp_label), buf);
+
+                          - label:
+                              id: sleep_high_temp_label
+                              text: "20.0°C"
+                              x: 240
+                              y: 75
+                              width: 60
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return BRIGHT_BLUE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 3
+
+                          - button:
+                              id: sleep_high_minus_btn
+                              x: 320
+                              y: 70
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_BLUE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(sleep_high_slider));
+                                    int new_val = current_val - 1;
+                                    if (new_val >= 150) {
+                                      lv_slider_set_value(id(sleep_high_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_sleep_temp_high) = temp;
+                                      id(sleep_preset_high_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(sleep_high_temp_label), buf);
+                                    }
+
+                          - button:
+                              id: sleep_high_plus_btn
+                              x: 370
+                              y: 70
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return BRIGHT_BLUE;  # !lambda return BRIGHT_BLUE;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_16
+                              on_click:
+                                - lambda: |-
+                                    int current_val = lv_slider_get_value(id(sleep_high_slider));
+                                    int new_val = current_val + 1;
+                                    if (new_val <= 350) {
+                                      lv_slider_set_value(id(sleep_high_slider), new_val, LV_ANIM_ON);
+                                      float temp = new_val / 10.0;
+                                      id(preset_sleep_temp_high) = temp;
+                                      id(sleep_preset_high_temp).publish_state(temp);
+                                      id(update_preset_from_spinbox).execute();
+                                      char buf[32];
+                                      snprintf(buf, sizeof(buf), "%.1f°C", temp);
+                                      lv_label_set_text(id(sleep_high_temp_label), buf);
+                                    }
+
+                          # Time Section
+                          - label:
+                              text: "Start Time:"
+                              x: 0
+                              y: 165
+                              text_font: montserrat_14
+                              text_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+
+                          - label:
+                              id: sleep_time_display
+                              text: "22:00"
+                              x: 90
+                              y: 165
+                              width: 80
+                              text_align: CENTER
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;  # !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 5
+                              pad_all: 5
+
+                          - label:
+                              id: sleep_hour_label
+                              text: "22"
+                              x: 190
+                              y: 165
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+
+                          - button:
+                              id: sleep_hour_minus_btn
+                              x: 190
+                              y: 195
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_sleep_hour);
+                                    hour = (hour == 0) ? 23 : hour - 1;
+                                    id(preset_sleep_hour) = hour;
+                                    id(sleep_preset_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(sleep_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(sleep_time_display), "%02d:%02d", hour, id(preset_sleep_minute));
+
+                          - button:
+                              id: sleep_hour_plus_btn
+                              x: 190
+                              y: 120
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int hour = id(preset_sleep_hour);
+                                    hour = (hour == 23) ? 0 : hour + 1;
+                                    id(preset_sleep_hour) = hour;
+                                    id(sleep_preset_hour_num).publish_state(hour);
+                                    lv_label_set_text_fmt(id(sleep_hour_label), "%02d", hour);
+                                    lv_label_set_text_fmt(id(sleep_time_display), "%02d:%02d", hour, id(preset_sleep_minute));         
+                          - label:
+                              text: ":"
+                              x: 240
+                              y: 165
+                              text_font: montserrat_16
+                              text_color: !lambda return WHITE;
+                          - label:
+                              id: sleep_minute_label
+                              text: "00"
+                              x: 255
+                              y: 165
+                              width: 40
+                              text_align: CENTER
+                              text_font: montserrat_14
+                              text_color: !lambda return WHITE;
+                              bg_color: 0x444444
+                              bg_opa: 1
+                              radius: 3
+                              pad_all: 3
+
+                          - button:
+                              id: sleep_minute_minus_btn
+                              x: 255
+                              y: 195
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "-"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_sleep_minute);
+                                    minute = (minute == 0) ? 59 : minute - 1;
+                                    id(preset_sleep_minute) = minute;
+                                    id(sleep_preset_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(sleep_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(sleep_time_display), "%02d:%02d", id(preset_sleep_hour), minute);
+
+                          - button:
+                              id: sleep_minute_plus_btn
+                              x: 255
+                              y: 120
+                              width: 40
+                              height: 35
+                              bg_color: !lambda return NEUTRAL_GRAY;  # !lambda return NEUTRAL_GRAY;
+                              radius: 8
+                              widgets:
+                                - label:
+                                    text: "+"
+                                    text_color: !lambda return WHITE;
+                                    text_font: montserrat_14
+                              on_click:
+                                - lambda: |-
+                                    int minute = id(preset_sleep_minute);
+                                    minute = (minute == 59) ? 0 : minute + 1;
+                                    id(preset_sleep_minute) = minute;
+                                    id(sleep_preset_minute_num).publish_state(minute);
+                                    lv_label_set_text_fmt(id(sleep_minute_label), "%02d", minute);
+                                    lv_label_set_text_fmt(id(sleep_time_display), "%02d:%02d", id(preset_sleep_hour), minute);
+
+              # Bottom buttons
+              - obj:
+                  id: preset_buttons
+                  x: 0
+                  y: 400
+                  width: 460
+                  height: 60
+                  bg_color: !lambda return BLACK;
+                  bg_opa: 1
+                  layout:
+                    type: flex
+                    flex_flow: ROW
+                    flex_align_main: SPACE_AROUND
+                    flex_align_cross: CENTER
+                  widgets:
+                    - button:
+                        id: preset_save_btn
+                        width: 120
+                        height: 30
+                        bg_color: 0x00AA00  # GREEN
+                        bg_opa: 1
+                        radius: 10
+                        border_width: 2
+                        border_color: 0x00DD00
+                        widgets:
+                          - label:
+                              text: "SAVE"
+                              text_color: !lambda return WHITE;
+                              text_font: montserrat_16
+                              text_align: CENTER
+                        on_click:
+                          - script.execute: save_preset_settings
+                          
+                    - button:
+                        id: preset_back_btn
+                        width: 120
+                        height: 30
+                        bg_color: !lambda return DARK_GRAY;
+                        bg_opa: 1
+                        radius: 10
+                        border_width: 2
+                        border_color: !lambda return LIGHT_GRAY;
+                        widgets:
+                          - label:
+                              text: "BACK"
+                              text_color: !lambda return WHITE;
+                              text_font: montserrat_16
+                              text_align: CENTER
+                        on_click:
+                          - lvgl.page.show: thermostat_page
+
+
+
+  top_layer:
+    text_color: !lambda return WHITE;
+    widgets:
+      - label:
+          id: ip_label
+          text: "0.0.0.0"
+          text_color: !lambda return LIGHT_GRAY;
+          pad_top: 8
+          pad_left: 16
+      - label:
+          id: date_label
+          align: top_right
+          text: "--:-- --- -- ---"
+          text_color: !lambda return LIGHT_GRAY;
+          pad_top: 8
+          pad_right: 16
+      - obj:
+          id: boot_screen
+          x: 0
+          y: 0
+          width: 100%
+          height: 100%
+          bg_color: !lambda return BLACK;
+          bg_opa: COVER
+          radius: 0
+          pad_all: 0
+          border_width: 0
+          widgets:
+            - label:
+                align: CENTER
+                y: -130
+                text: 'Living Room'
+                text_font: montserrat_48
+                text_color: !lambda return BRIGHT_BLUE;
+            - label:
+                align: CENTER
+                y: -60
+                text: 'Thermostat'
+                text_font: montserrat_48
+                text_color: !lambda return BRIGHT_ORANGE;
+            - label:
+                align: CENTER
+                y: 10
+                text: 'Loading presets and current temperature ...'
+                text_font: montserrat_16
+                text_color: !lambda return DARK_GRAY;
+            - spinner:
+                align: CENTER
+                y: 120
+                height: 50
+                width: 50
+                spin_time: 1s
+                arc_color: !lambda return DARK_GRAY;
+                arc_length: 60deg
+                arc_width: 8
+                indicator:
+                  arc_width: 8
