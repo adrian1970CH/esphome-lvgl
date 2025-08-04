@@ -74,6 +74,13 @@ ap_password: "YourAccessPointPassword"
 api_encryption_key: "your-32-character-encryption-key"
 ota_password: "your-ota-update-password"
 ```
+Edit code to match your temperature sensor! (around #639 to #642 line numbers)
+```yaml
+sensor:
+  - platform: homeassistant
+    id: ble_sensor_raw
+    entity_id: sensor.temperature_sensor_1_temperature
+```
 
 ### 4. Install ESPHome
 ```bash
@@ -83,10 +90,10 @@ pip3 install esphome
 ### 5. Test the Thermostat
 ```bash
 # Compile configuration
-esphome compile thermostat.yaml
+esphome compile Guition-S3-square-4-inch.yaml
 
 # Upload to device (first time via USB)
-esphome upload thermostat.yaml
+esphome upload Guition-S3-square-4-inch.yaml
 
 # Test in Heat-Cool mode for full functionality
 ```
