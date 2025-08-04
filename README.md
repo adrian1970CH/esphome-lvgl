@@ -74,7 +74,8 @@ ap_password: "YourAccessPointPassword"
 api_encryption_key: "your-32-character-encryption-key"
 ota_password: "your-ota-update-password"
 ```
-Edit code to match your temperature sensor! (around #639 to #642 line numbers)
+Edit the code to match your temperature sensor! 
+(from line #639 to #642)
 ```yaml
 sensor:
   - platform: homeassistant
