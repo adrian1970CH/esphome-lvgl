@@ -1032,7 +1032,7 @@ script:
           heat_checked: !lambda 'return heat_checked;'
           cool_checked: !lambda 'return cool_checked;'
           force_off_mode: false
-          
+
   - id: update_preset_active_button_display
     then:
       - lambda: |-
@@ -1305,7 +1305,7 @@ climate:
     # Static preset configurations - these will be updated dynamically
     preset:
       - name: Home
-        # Use static default values - we'll override these dynamically
+        # Static default values - we'll override these dynamically
         default_target_temperature_low: 20.0
         default_target_temperature_high: 22.0
       - name: Away
@@ -1315,7 +1315,7 @@ climate:
         default_target_temperature_low: 17.0
         default_target_temperature_high: 23.0
     
-    # Add a preset change handler to apply our custom temperatures
+    # Preset change handler to apply the custom temperatures
     preset_change:
       - script.execute: apply_custom_preset_temperatures
     sensor: ble_sensor_raw
@@ -1337,8 +1337,6 @@ climate:
       - switch.turn_on: relay_1
     idle_action:
       - switch.turn_off: relay_1
-
-    # Replace the on_state section in your climate component with this updated version:
 
     on_state:
       - if:
@@ -1498,7 +1496,6 @@ climate:
             prev_preset = current_preset;
           }
       
-      # Call the NEW reusable script for arc styling with automatic OFF mode detection
       - script.execute:
           id: update_thermostat_display_colors
           heating_value: !lambda 'return int(x.target_temperature_low * 10);'
@@ -1821,8 +1818,6 @@ lvgl:
               border_width: 10
               border_color: !lambda return BRIGHT_BLUE;
               border_opa: 0
-          
-# Replace the dual_setpoint_arc on_value section with this updated version:
 
         # Foreground adjustment arc
         - arc:
@@ -1975,8 +1970,6 @@ lvgl:
             y: 74
             x: -40
 
-        # Replace your plus and minus button on_click sections with these updated versions:
-
         # Plus button - ADD call to new color script
         - button: 
             id: temp_plus_btn
@@ -2128,7 +2121,6 @@ lvgl:
                   text_font: roboto_32
                   text_color: !lambda return NEUTRAL_GRAY;
 
-        # Heat selection button - ADD call to new color script
         - button:
             id: heat_sel_button
             align: CENTER
@@ -2168,7 +2160,6 @@ lvgl:
                   cool_checked: false
                   force_off_mode: false
 
-        # Cool selection button - ADD call to new color script
         - button:
             id: cool_sel_button
             align: CENTER
@@ -2218,7 +2209,6 @@ lvgl:
             checkable: false
             shadow_width: 0
 
-        # Heat button - ADD call to new color script
         - button:
             id: heat_btn
             align: CENTER
