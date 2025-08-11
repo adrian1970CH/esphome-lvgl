@@ -8,7 +8,12 @@ esphome:
   on_boot:
     priority: -100
     then:
-    - delay: 5s
+    - delay: 2s
+    # Sync the global with the switch state (reverse of what we tried before)
+    - lambda: |-
+        bool switch_state = id(preset_schedule_switch).state;
+        id(presets_enabled) = switch_state;
+        ESP_LOGI("presets", "Boot: Synced global presets_enabled to switch state: %s", switch_state ? "ON" : "OFF");
     - script.execute: init_preset_temperatures
     - globals.set:
         id: boot_screen_hidden
@@ -17,7 +22,13 @@ esphome:
     - wait_until:
         condition:
           lambda: 'return !isnan(id(thermostat_living).current_temperature);'
-        timeout: 30s
+        # timeout: 30s
+    # Update date label on boot
+    - lvgl.label.update:
+        id: date_label
+        text: !lambda |-
+          auto time = id(my_time).now();
+          return time.strftime("%H:%M %a %d %b");
     - lvgl.widget.hide: boot_screen
     - globals.set:
         id: boot_screen_hidden
@@ -28,7 +39,7 @@ esphome:
         float target_low = id(thermostat_living).target_temperature_low;
         float target_high = id(thermostat_living).target_temperature_high;
         float current_temp = id(thermostat_living).current_temperature;
-        
+       
         // Fallback to preset defaults if values are invalid
         if (isnan(target_low) || target_low < 10.0f || target_low > 40.0f) {
           target_low = 21.0f;
@@ -36,90 +47,38 @@ esphome:
         if (isnan(target_high) || target_high < 10.0f || target_high > 40.0f) {
           target_high = 23.0f;
         }
-        
+       
         int target_low_arc_value = int(target_low * 10);
         int target_high_arc_value = int(target_high * 10);
         int current_temp_arc_value = int(current_temp * 10);
-        
-        // Set heat_sel_button to checked
-        lv_obj_add_state(id(heat_sel_button), LV_STATE_CHECKED);
-        
+       
         // Set dual_setpoint_arc to target_low value
         lv_arc_set_value(id(dual_setpoint_arc), target_low_arc_value);
-        
-        // Initialize dual_current_temp_arc with proper styling - MATCH the climate on_state logic exactly
-        int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
-        int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
-        int normal_value = current_temp_arc_value; // Since we're in normal mode initially
-        
-        // Case 1: heating_value > normal_value (heating needed)
-        if (target_low_arc_value > normal_value) {
-          lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
-          lv_arc_set_value(id(dual_current_temp_arc), current_temp_arc_value);
-          
-          // Set dual_current_temp_arc colors
-          lv_obj_set_style_arc_color(id(dual_current_temp_arc), DARK_ORANGE, LV_PART_INDICATOR);
-          lv_obj_set_style_arc_opa(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR);
-          lv_obj_set_style_pad_all(id(dual_current_temp_arc), 0, LV_PART_KNOB);
-          lv_obj_set_style_border_color(id(dual_current_temp_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-          lv_obj_set_style_border_opa(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB);
-          
-          // Set heating_arc colors (should be BRIGHT_ORANGE when active)
-          lv_obj_set_style_arc_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_INDICATOR);
-          lv_obj_set_style_border_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-          lv_obj_set_style_bg_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-          
-          // Set cooling_arc colors (should be DARK when not active)
-          lv_obj_set_style_arc_color(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
-          lv_obj_set_style_border_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-          lv_obj_set_style_bg_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-          
-        }
-        // Case 2: cooling_value < normal_value (cooling needed)
-        else if (target_high_arc_value < normal_value) {
-          lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_REVERSE);
-          lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - current_temp_arc_value);
-          
-          // Set dual_current_temp_arc colors
-          lv_obj_set_style_arc_color(id(dual_current_temp_arc), DARK_BLUE, LV_PART_INDICATOR);
-          lv_obj_set_style_arc_opa(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR);
-          lv_obj_set_style_pad_all(id(dual_current_temp_arc), 0, LV_PART_KNOB);
-          lv_obj_set_style_border_color(id(dual_current_temp_arc), BRIGHT_BLUE, LV_PART_KNOB);
-          lv_obj_set_style_border_opa(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB);
-          
-          // Set cooling_arc colors (should be BRIGHT_BLUE when active)
-          lv_obj_set_style_arc_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_MAIN);
-          lv_obj_set_style_border_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
-          lv_obj_set_style_bg_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
-          
-          // Set heating_arc colors (should be DARK when not active)
-          lv_obj_set_style_arc_color(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
-          lv_obj_set_style_border_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-          lv_obj_set_style_bg_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-          
-        }
-        // Case 3: temperature is in range (cooling_value >= normal_value and heating_value <= normal_value)
-        else {
-          lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
-          lv_arc_set_value(id(dual_current_temp_arc), current_temp_arc_value);
-          
-          // Hide dual_current_temp_arc indicator and knob
-          lv_obj_set_style_arc_opa(id(dual_current_temp_arc), LV_OPA_0, LV_PART_INDICATOR);
-          lv_obj_set_style_pad_all(id(dual_current_temp_arc), -10, LV_PART_KNOB);
-          lv_obj_set_style_border_opa(id(dual_current_temp_arc), LV_OPA_0, LV_PART_KNOB);
-          
-          // Set both arcs to DARK colors when in range
-          lv_obj_set_style_arc_color(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
-          lv_obj_set_style_border_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-          lv_obj_set_style_bg_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-          
-          lv_obj_set_style_arc_color(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
-          lv_obj_set_style_border_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-          lv_obj_set_style_bg_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-        }
-        
-        ESP_LOGD("thermostat", "Boot init - current: %.1f, target_low: %.1f, target_high: %.1f", 
+       
+        ESP_LOGD("thermostat", "Boot init - current: %.1f, target_low: %.1f, target_high: %.1f",
                  current_temp, target_low, target_high);
+   
+    # Call the NEW reusable script for arc styling
+    - script.execute:
+        id: update_thermostat_display_colors
+        heating_value: !lambda 'return int(id(thermostat_living).target_temperature_low * 10);'
+        cooling_value: !lambda 'return int(id(thermostat_living).target_temperature_high * 10);'
+        current_temp_value: !lambda 'return int(id(thermostat_living).current_temperature * 10);'
+        heat_checked: false  # No temperature selection on boot
+        cool_checked: false
+        force_off_mode: false  # Let script auto-detect based on climate state
+    # Initialize preset button display
+    - script.execute: update_preset_active_button_display
+    # Force update the template switch state based on restored global
+    - delay: 100ms
+    - lambda: |-
+        if (id(presets_enabled)) {
+          id(preset_schedule_switch).publish_state(true);
+          ESP_LOGI("presets", "Restored preset switch to ON state");
+        } else {
+          id(preset_schedule_switch).publish_state(false);
+          ESP_LOGI("presets", "Restored preset switch to OFF state");
+        }
 
 globals:
   - id: updating_from_lvgl
@@ -598,18 +557,29 @@ switch:
     pin: GPIO40
     id: relay_1
     inverted: False
+  
   - platform: template
     name: "Preset Schedule Switch"
     id: preset_schedule_switch
-    lambda: 'return id(presets_enabled);'
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF  # This will restore the actual last state
+    # No lambda - let it restore its own state
     turn_on_action:
       - globals.set:
           id: presets_enabled
           value: 'true'
+      - script.execute: update_preset_active_button_display
+      - logger.log:
+          format: "Preset schedule switch turned ON"
+          level: INFO
     turn_off_action:
       - globals.set:
           id: presets_enabled
           value: 'false'
+      - script.execute: update_preset_active_button_display
+      - logger.log:
+          format: "Preset schedule switch turned OFF"
+          level: INFO
 
 output:
   - platform: ledc
@@ -640,69 +610,590 @@ sensor:
   - platform: homeassistant
     id: ble_sensor_raw
     entity_id: sensor.temperature_sensor_1_temperature
-    
-# ==== INITIALIZATION SCRIPT ====
-script:
-  - id: apply_custom_preset_temperatures
-    then:
-      - delay: 100ms  # Small delay to let preset change complete
+
+  - platform: homeassistant
+    id: temp_reconnect_monitor
+    entity_id: sensor.temperature_sensor_1_temperature  # Same entity, different ID for monitoring
+    internal: true
+    on_value:
       - lambda: |-
-          // Get current preset and apply corresponding custom temperatures
-          auto current_preset = id(thermostat_living).preset;
-          float target_low = 20.0;
-          float target_high = 22.0;
+          static bool sensor_was_nan = true;
+          static bool first_run = true;
           
-          if (current_preset == CLIMATE_PRESET_HOME) {
-            target_low = id(preset_home_temp_low);
-            target_high = id(preset_home_temp_high);
-            ESP_LOGI("thermostat", "Applying Home preset: %.1f - %.1f", target_low, target_high);
-          } else if (current_preset == CLIMATE_PRESET_AWAY) {
-            target_low = id(preset_away_temp_low);
-            target_high = id(preset_away_temp_high);
-            ESP_LOGI("thermostat", "Applying Away preset: %.1f - %.1f", target_low, target_high);
-          } else if (current_preset == CLIMATE_PRESET_SLEEP) {
-            target_low = id(preset_sleep_temp_low);
-            target_high = id(preset_sleep_temp_high);
-            ESP_LOGI("thermostat", "Applying Sleep preset: %.1f - %.1f", target_low, target_high);
+          if (first_run) {
+            first_run = false;
+            sensor_was_nan = isnan(x);
+            return;
           }
           
-          // Apply the custom temperatures
-          auto call = id(thermostat_living).make_call();
-          call.set_target_temperature_low(target_low);
-          call.set_target_temperature_high(target_high);
-          call.perform();
+          bool current_is_nan = isnan(x);
+          bool sensor_came_online = sensor_was_nan && !current_is_nan;
+          
+          if (sensor_came_online) {
+            ESP_LOGI("thermostat", "Temperature sensor reconnected: %.1f°C", x);
+            
+            // Get the ACTUAL target temperatures from climate component
+            float target_low = id(thermostat_living).target_temperature_low;
+            float target_high = id(thermostat_living).target_temperature_high;
+            
+            if (!isnan(target_low) && !isnan(target_high)) {
+              // Calculate arc values
+              int target_low_arc_value = int(target_low * 10);
+              int target_high_arc_value = int(target_high * 10);
+              int current_temp_arc_value = int(x * 10);
+              
+              ESP_LOGI("thermostat", "Correcting arcs after reconnection - target_low: %.1f (%d), target_high: %.1f (%d), current: %.1f (%d)", 
+                       target_low, target_low_arc_value, target_high, target_high_arc_value, x, current_temp_arc_value);
+              
+              // Ensure heating_arc and cooling_arc are set to TARGET temperatures, not current
+              lv_arc_set_value(id(heating_arc), target_low_arc_value);
+              lv_arc_set_value(id(cooling_arc), target_high_arc_value);
+              
+              // Check which button is selected to determine dual_setpoint_arc value
+              bool heat_checked = lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);
+              bool cool_checked = lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);
+              
+              if (heat_checked) {
+                lv_arc_set_value(id(dual_setpoint_arc), target_low_arc_value);
+                ESP_LOGI("thermostat", "Set dual_setpoint_arc to heating target: %d", target_low_arc_value);
+              } else if (cool_checked) {
+                lv_arc_set_value(id(dual_setpoint_arc), target_high_arc_value);
+                ESP_LOGI("thermostat", "Set dual_setpoint_arc to cooling target: %d", target_high_arc_value);
+              } else {
+                lv_arc_set_value(id(dual_setpoint_arc), target_low_arc_value);
+                ESP_LOGI("thermostat", "Set dual_setpoint_arc to default heating target: %d", target_low_arc_value);
+              }
+              
+              // Force update the current temperature arc
+              int current_arc_value = current_temp_arc_value;
+              lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
+              if (current_mode == LV_ARC_MODE_REVERSE) {
+                int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
+                int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
+                current_arc_value = max_val + min_val - current_temp_arc_value;
+              }
+              lv_arc_set_value(id(dual_current_temp_arc), current_arc_value);
+              
+              // Call the NEW styling script to ensure colors are correct
+              id(update_thermostat_display_colors).execute(
+                target_low_arc_value,     // heating_value
+                target_high_arc_value,    // cooling_value
+                current_temp_arc_value,   // current_temp_value
+                heat_checked,             // heat_checked
+                cool_checked,             // cool_checked
+                false                     // force_off_mode - let script auto-detect
+              );
+              
+              ESP_LOGI("thermostat", "Arc correction completed after sensor reconnection");
+            }
+          }
+          
+          sensor_was_nan = current_is_nan;
+
+
+# ==== INITIALIZATION SCRIPT ====
+script:
+  # Master script for all arc and label color management
+  - id: update_thermostat_display_colors
+    parameters:
+      heating_value: int
+      cooling_value: int
+      current_temp_value: int
+      heat_checked: bool
+      cool_checked: bool
+      force_off_mode: bool  # New parameter to force OFF mode styling
+    then:
+      - lambda: |-
+          // Helper function definitions
+          auto set_arc_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
+            lv_color_t current_color = lv_obj_get_style_arc_color(obj, part);
+            if (current_color.full != new_color.full) {
+              lv_obj_set_style_arc_color(obj, new_color, part);
+            }
+          };
+
+          auto set_border_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
+            lv_color_t current_color = lv_obj_get_style_border_color(obj, part);
+            if (current_color.full != new_color.full) {
+              lv_obj_set_style_border_color(obj, new_color, part);
+            }
+          };
+
+          auto set_bg_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
+            lv_color_t current_color = lv_obj_get_style_bg_color(obj, part);
+            if (current_color.full != new_color.full) {
+              lv_obj_set_style_bg_color(obj, new_color, part);
+            }
+          };
+
+          auto set_text_color_if_different = [](lv_obj_t* obj, lv_color_t new_color) {
+            lv_color_t current_color = lv_obj_get_style_text_color(obj, LV_STATE_DEFAULT);
+            if (current_color.full != new_color.full) {
+              lv_obj_set_style_text_color(obj, new_color, LV_STATE_DEFAULT);
+            }
+          };
+
+          auto set_opa_if_different = [](lv_obj_t* obj, lv_opa_t new_opa, lv_part_t part, lv_style_prop_t prop) {
+            lv_opa_t current_opa = (prop == LV_STYLE_ARC_OPA) ? lv_obj_get_style_arc_opa(obj, part) : lv_obj_get_style_border_opa(obj, part);
+            if (current_opa != new_opa) {
+              if (prop == LV_STYLE_ARC_OPA) {
+                lv_obj_set_style_arc_opa(obj, new_opa, part);
+              } else {
+                lv_obj_set_style_border_opa(obj, new_opa, part);
+              }
+            }
+          };
+
+          auto set_pad_if_different = [](lv_obj_t* obj, lv_coord_t pad_value, lv_part_t part) {
+            lv_coord_t current_pad_top = lv_obj_get_style_pad_top(obj, part);
+            lv_coord_t current_pad_bottom = lv_obj_get_style_pad_bottom(obj, part);
+            lv_coord_t current_pad_left = lv_obj_get_style_pad_left(obj, part);
+            lv_coord_t current_pad_right = lv_obj_get_style_pad_right(obj, part);
+
+            if (current_pad_top != pad_value || current_pad_bottom != pad_value || current_pad_left != pad_value || current_pad_right != pad_value) {
+              lv_obj_set_style_pad_all(obj, pad_value, part);
+            }
+          };
+
+          // Check if OFF mode is active
+          bool is_off_mode = force_off_mode || lv_obj_has_state(id(off_btn), LV_STATE_CHECKED);
+
+          if (is_off_mode) {
+            // OFF MODE STYLING - Everything becomes DARK_GRAY except selected temperature
+            ESP_LOGD("thermostat", "Applying OFF mode styling");
+            
+            // Hide dual_current_temp_arc completely in OFF mode
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+            set_pad_if_different(id(dual_current_temp_arc), -10, LV_PART_KNOB);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+            
+            // Set both arcs to DARK_GRAY in OFF mode
+            set_arc_color_if_different(id(heating_arc), DARK_GRAY, LV_PART_INDICATOR);
+            set_arc_color_if_different(id(cooling_arc), DARK_GRAY, LV_PART_MAIN);
+            
+            // Set knob colors and borders based on selection state
+            if (heat_checked) {
+              // Heat temperature is selected - show WHITE knob
+              set_bg_color_if_different(id(heating_arc), lv_color_white(), LV_PART_KNOB);
+              set_border_color_if_different(id(heating_arc), LIGHT_GRAY, LV_PART_KNOB);
+              
+              // Cooling knob remains DARK_GRAY
+              set_bg_color_if_different(id(cooling_arc), DARK_GRAY, LV_PART_KNOB);
+              set_border_color_if_different(id(cooling_arc), LIGHT_GRAY, LV_PART_KNOB);
+              
+              // Heat labels become WHITE, cool labels stay DARK_GRAY
+              set_text_color_if_different(id(heat_setpoint_label), lv_color_white());
+              set_text_color_if_different(id(heat_decimal_label), lv_color_white());
+              set_text_color_if_different(id(heat_celsius_label), lv_color_white());
+              
+              set_text_color_if_different(id(cool_setpoint_label), DARK_GRAY);
+              set_text_color_if_different(id(cool_decimal_label), DARK_GRAY);
+              set_text_color_if_different(id(cool_celsius_label), DARK_GRAY);
+              
+            } else if (cool_checked) {
+              // Cool temperature is selected - show WHITE knob
+              set_bg_color_if_different(id(cooling_arc), lv_color_white(), LV_PART_KNOB);
+              set_border_color_if_different(id(cooling_arc), LIGHT_GRAY, LV_PART_KNOB);
+              
+              // Heating knob remains DARK_GRAY
+              set_bg_color_if_different(id(heating_arc), DARK_GRAY, LV_PART_KNOB);
+              set_border_color_if_different(id(heating_arc), LIGHT_GRAY, LV_PART_KNOB);
+              
+              // Cool labels become WHITE, heat labels stay DARK_GRAY
+              set_text_color_if_different(id(cool_setpoint_label), lv_color_white());
+              set_text_color_if_different(id(cool_decimal_label), lv_color_white());
+              set_text_color_if_different(id(cool_celsius_label), lv_color_white());
+              
+              set_text_color_if_different(id(heat_setpoint_label), DARK_GRAY);
+              set_text_color_if_different(id(heat_decimal_label), DARK_GRAY);
+              set_text_color_if_different(id(heat_celsius_label), DARK_GRAY);
+              
+            } else {
+              // No temperature selected - both knobs DARK_GRAY
+              set_bg_color_if_different(id(heating_arc), DARK_GRAY, LV_PART_KNOB);
+              set_border_color_if_different(id(heating_arc), LIGHT_GRAY, LV_PART_KNOB);
+              
+              set_bg_color_if_different(id(cooling_arc), DARK_GRAY, LV_PART_KNOB);
+              set_border_color_if_different(id(cooling_arc), LIGHT_GRAY, LV_PART_KNOB);
+              
+              // All temperature labels DARK_GRAY
+              set_text_color_if_different(id(heat_setpoint_label), DARK_GRAY);
+              set_text_color_if_different(id(heat_decimal_label), DARK_GRAY);
+              set_text_color_if_different(id(heat_celsius_label), DARK_GRAY);
+              
+              set_text_color_if_different(id(cool_setpoint_label), DARK_GRAY);
+              set_text_color_if_different(id(cool_decimal_label), DARK_GRAY);
+              set_text_color_if_different(id(cool_celsius_label), DARK_GRAY);
+            }
+            
+            // Set other labels to DARK_GRAY in OFF mode
+            set_text_color_if_different(id(dual_action_label), DARK_GRAY);
+            set_text_color_if_different(id(dual_temperature_label), DARK_GRAY);
+            set_text_color_if_different(id(thermometer_sign_label), DARK_GRAY);
+            
+            // Set button borders to DARK_GRAY in OFF mode
+            set_border_color_if_different(id(temp_plus_btn), DARK_GRAY, LV_STATE_DEFAULT);
+            set_border_color_if_different(id(temp_minus_btn), DARK_GRAY, LV_STATE_DEFAULT);
+            
+            return; // Exit early for OFF mode
+          }
+
+          // NORMAL MODE STYLING (when OFF is not selected)
+          ESP_LOGD("thermostat", "Applying normal mode styling");
+          
+          // Get arc parameters for temperature comparison
+          int actual_value = lv_arc_get_value(id(dual_current_temp_arc));
+          int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
+          int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
+          lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
+
+          // Calculate normal value based on current mode
+          int normal_value = (current_mode == LV_ARC_MODE_REVERSE) ? (max_val + min_val - actual_value) : actual_value;
+          
+          // Use current_temp_value if provided (for boot scenario), otherwise use calculated normal_value
+          int effective_normal_value = (current_temp_value > 0) ? current_temp_value : normal_value;
+
+          // Apply styling based on temperature conditions
+          if (heating_value > effective_normal_value) {
+            // Heating needed - show orange styling
+            if (current_mode != LV_ARC_MODE_NORMAL) {
+              lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
+              lv_arc_set_value(id(dual_current_temp_arc), (current_temp_value > 0) ? current_temp_value : (max_val + min_val - actual_value));
+            }
+            
+            // Set dual_current_temp_arc colors
+            set_arc_color_if_different(id(dual_current_temp_arc), DARK_ORANGE, LV_PART_INDICATOR);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+            set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
+            set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+            
+            // Set heating_arc colors (active)
+            set_arc_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_INDICATOR);
+            set_border_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+            
+            // Set cooling_arc colors (inactive)
+            set_arc_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
+            set_border_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+            
+            // Handle knob background colors based on selection state
+            if (heat_checked) {
+              set_bg_color_if_different(id(heating_arc), lv_color_white(), LV_PART_KNOB);  // White when selected
+              set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+            } else if (cool_checked) {
+              set_bg_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+              set_bg_color_if_different(id(cooling_arc), lv_color_white(), LV_PART_KNOB);  // White when selected
+            } else {
+              set_bg_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
+              set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+            }
+
+          } else if (cooling_value < effective_normal_value) {
+            // Cooling needed - show blue styling
+            if (current_mode != LV_ARC_MODE_REVERSE) {
+              lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_REVERSE);
+              lv_arc_set_value(id(dual_current_temp_arc), (current_temp_value > 0) ? (max_val + min_val - current_temp_value) : (max_val + min_val - actual_value));
+            }
+            
+            // Set dual_current_temp_arc colors
+            set_arc_color_if_different(id(dual_current_temp_arc), DARK_BLUE, LV_PART_INDICATOR);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+            set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
+            set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_BLUE, LV_PART_KNOB);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+            
+            // Set cooling_arc colors (active)
+            set_arc_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_MAIN);
+            set_border_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+            
+            // Set heating_arc colors (inactive)
+            set_arc_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
+            set_border_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+            
+            // Handle knob background colors based on selection state
+            if (heat_checked) {
+              set_bg_color_if_different(id(heating_arc), lv_color_white(), LV_PART_KNOB);  // White when selected
+              set_bg_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+            } else if (cool_checked) {
+              set_bg_color_if_different(id(cooling_arc), lv_color_white(), LV_PART_KNOB);  // White when selected
+              set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+            } else {
+              set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+              set_bg_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
+            }
+
+          } else {
+            // Temperature is in range - hide current temp arc, show neutral colors
+            if (current_mode != LV_ARC_MODE_NORMAL) {
+              lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
+              lv_arc_set_value(id(dual_current_temp_arc), (current_temp_value > 0) ? current_temp_value : (max_val + min_val - actual_value));
+            }
+            
+            // Hide dual_current_temp_arc indicator and knob
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
+            set_pad_if_different(id(dual_current_temp_arc), -10, LV_PART_KNOB);
+            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
+            
+            // Set both arcs to DARK colors when in range
+            set_arc_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
+            set_border_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+            
+            set_arc_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
+            set_border_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+            
+            // Handle knob background colors based on button selection
+            if (heat_checked) {
+              set_bg_color_if_different(id(heating_arc), lv_color_white(), LV_PART_KNOB);  // White when selected
+              set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+            } else if (cool_checked) {
+              set_bg_color_if_different(id(cooling_arc), lv_color_white(), LV_PART_KNOB);  // White when selected
+              set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+            } else {
+              set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
+              set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
+            }
+          }
+
+          // Handle label colors in normal mode based on selection state
+          if (heat_checked) {
+            set_text_color_if_different(id(heat_setpoint_label), lv_color_white());
+            set_text_color_if_different(id(heat_decimal_label), lv_color_white());
+            set_text_color_if_different(id(heat_celsius_label), lv_color_white());
+            
+            set_text_color_if_different(id(cool_setpoint_label), NEUTRAL_GRAY);
+            set_text_color_if_different(id(cool_decimal_label), NEUTRAL_GRAY);
+            set_text_color_if_different(id(cool_celsius_label), NEUTRAL_GRAY);
+            
+            set_border_color_if_different(id(temp_plus_btn), DARK_ORANGE, LV_STATE_DEFAULT);
+            set_border_color_if_different(id(temp_minus_btn), DARK_ORANGE, LV_STATE_DEFAULT);
+            
+          } else if (cool_checked) {
+            set_text_color_if_different(id(heat_setpoint_label), NEUTRAL_GRAY);
+            set_text_color_if_different(id(heat_decimal_label), NEUTRAL_GRAY);
+            set_text_color_if_different(id(heat_celsius_label), NEUTRAL_GRAY);
+            
+            set_text_color_if_different(id(cool_setpoint_label), lv_color_white());
+            set_text_color_if_different(id(cool_decimal_label), lv_color_white());
+            set_text_color_if_different(id(cool_celsius_label), lv_color_white());
+            
+            set_border_color_if_different(id(temp_plus_btn), DARK_BLUE, LV_STATE_DEFAULT);
+            set_border_color_if_different(id(temp_minus_btn), DARK_BLUE, LV_STATE_DEFAULT);
+            
+          } else {
+            // No temperature selected - neutral colors
+            set_text_color_if_different(id(heat_setpoint_label), NEUTRAL_GRAY);
+            set_text_color_if_different(id(heat_decimal_label), NEUTRAL_GRAY);
+            set_text_color_if_different(id(heat_celsius_label), NEUTRAL_GRAY);
+            
+            set_text_color_if_different(id(cool_setpoint_label), NEUTRAL_GRAY);
+            set_text_color_if_different(id(cool_decimal_label), NEUTRAL_GRAY);
+            set_text_color_if_different(id(cool_celsius_label), NEUTRAL_GRAY);
+            
+            set_border_color_if_different(id(temp_plus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+            set_border_color_if_different(id(temp_minus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
+          }
+
+          // Handle status-based label colors in normal mode
+          lv_color_t status_color;
+          auto current_action = id(thermostat_living).action;
+          switch (current_action) {
+            case esphome::climate::CLIMATE_ACTION_HEATING:
+              status_color = BRIGHT_ORANGE;
+              break;
+            case esphome::climate::CLIMATE_ACTION_COOLING:
+              status_color = BRIGHT_BLUE;
+              break;
+            case esphome::climate::CLIMATE_ACTION_IDLE:
+              status_color = WHITE;
+              break;
+            default:
+              status_color = LIGHT_GRAY;
+              break;
+          }
+          
+          set_text_color_if_different(id(dual_action_label), status_color);
+          set_text_color_if_different(id(dual_temperature_label), status_color);
+          set_text_color_if_different(id(thermometer_sign_label), status_color);
+
+  # Keep the old script name for backward compatibility, but redirect to new master script
+  - id: update_thermostat_arc_styling
+    parameters:
+      heating_value: int
+      cooling_value: int
+      current_temp_value: int
+      heat_checked: bool
+      cool_checked: bool
+    then:
+      - script.execute:
+          id: update_thermostat_display_colors
+          heating_value: !lambda 'return heating_value;'
+          cooling_value: !lambda 'return cooling_value;'
+          current_temp_value: !lambda 'return current_temp_value;'
+          heat_checked: !lambda 'return heat_checked;'
+          cool_checked: !lambda 'return cool_checked;'
+          force_off_mode: false
+
+  # Other existing scripts remain the same...
+  - id: update_preset_active_button_display
+    then:
+      - lambda: |-
+          // Check if presets are enabled
+          if (!id(presets_enabled)) {
+            // If presets are disabled, show manual/vacation mode icon in dark green
+            lv_label_set_text(lv_obj_get_child(id(presets_active_btn), 0), "\U000F1055");
+            lv_obj_set_style_text_color(lv_obj_get_child(id(presets_active_btn), 0), DARK_GREEN, LV_STATE_DEFAULT);
+            ESP_LOGD("presets", "Presets disabled - showing manual/vacation mode icon");
+            return;
+          }
+          
+          // Get current thermostat state
+          auto current_preset = id(thermostat_living).preset;
+          float current_low = id(thermostat_living).target_temperature_low;
+          float current_high = id(thermostat_living).target_temperature_high;
+          
+          // Define preset icons
+          const char* home_icon = "\U000F02DC";
+          const char* away_icon = "\U000F1A46";
+          const char* sleep_icon = "\U000F0904";
+          const char* custom_icon = "\U000F1668";
+          
+          const char* icon_to_use = custom_icon;  // Default to custom
+          lv_color_t icon_color = DARK_GRAY;  // Default color
+          
+          // Check if current temperatures match any preset exactly
+          bool matches_preset = false;
+          
+          if (current_preset.has_value() && current_preset.value() == CLIMATE_PRESET_HOME) {
+            float preset_low = id(preset_home_temp_low);
+            float preset_high = id(preset_home_temp_high);
+            
+            if (abs(current_low - preset_low) < 0.1 && abs(current_high - preset_high) < 0.1) {
+              icon_to_use = home_icon;
+              icon_color = DARK_ORANGE;  // Active preset color
+              matches_preset = true;
+              ESP_LOGD("presets", "Displaying HOME preset icon");
+            }
+          } else if (current_preset.has_value() && current_preset.value() == CLIMATE_PRESET_AWAY) {
+            float preset_low = id(preset_away_temp_low);
+            float preset_high = id(preset_away_temp_high);
+            
+            if (abs(current_low - preset_low) < 0.1 && abs(current_high - preset_high) < 0.1) {
+              icon_to_use = away_icon;
+              icon_color = DARK_BLUE;  // Active preset color
+              matches_preset = true;
+              ESP_LOGD("presets", "Displaying AWAY preset icon");
+            }
+          } else if (current_preset.has_value() && current_preset.value() == CLIMATE_PRESET_SLEEP) {
+            float preset_low = id(preset_sleep_temp_low);
+            float preset_high = id(preset_sleep_temp_high);
+            
+            if (abs(current_low - preset_low) < 0.1 && abs(current_high - preset_high) < 0.1) {
+              icon_to_use = sleep_icon;
+              icon_color = DARK_PURPLE;  // dark purple for sleep
+              matches_preset = true;
+              ESP_LOGD("presets", "Displaying SLEEP preset icon");
+            }
+          }
+          
+          // If no preset matches or temperatures were manually adjusted, show custom icon
+          if (!matches_preset) {
+            icon_to_use = custom_icon;
+            icon_color = DARK_GRAY;  // Dimmed color for custom/manual
+            ESP_LOGD("presets", "Displaying CUSTOM icon (manual adjustment)");
+          }
+          
+          // Update the button label
+          lv_label_set_text(lv_obj_get_child(id(presets_active_btn), 0), icon_to_use);
+          lv_obj_set_style_text_color(lv_obj_get_child(id(presets_active_btn), 0), icon_color, LV_STATE_DEFAULT);
+          
+          ESP_LOGD("presets", "Preset button updated - Current: %.1f-%.1f, Preset: %d", 
+                   current_low, current_high, current_preset.has_value() ? (int)current_preset.value() : -1);
+
+  # Rest of your existing scripts remain unchanged...
+  - id: apply_custom_preset_temperatures
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(presets_enabled);'
+          then:
+            - lambda: |-
+                ESP_LOGI("thermostat", "Presets disabled - not applying preset temperatures");
+          else:
+            # Only run the preset application logic if presets are enabled
+            - delay: 100ms  # Small delay to let preset change complete
+            - lambda: |-
+                // Get current preset and apply corresponding custom temperatures
+                auto current_preset = id(thermostat_living).preset;
+                float target_low = 20.0;
+                float target_high = 22.0;
+
+                if (current_preset == CLIMATE_PRESET_HOME) {
+                  target_low = id(preset_home_temp_low);
+                  target_high = id(preset_home_temp_high);
+                  ESP_LOGI("thermostat", "Applying Home preset: %.1f - %.1f", target_low, target_high);
+                } else if (current_preset == CLIMATE_PRESET_AWAY) {
+                  target_low = id(preset_away_temp_low);
+                  target_high = id(preset_away_temp_high);
+                  ESP_LOGI("thermostat", "Applying Away preset: %.1f - %.1f", target_low, target_high);
+                } else if (current_preset == CLIMATE_PRESET_SLEEP) {
+                  target_low = id(preset_sleep_temp_low);
+                  target_high = id(preset_sleep_temp_high);
+                  ESP_LOGI("thermostat", "Applying Sleep preset: %.1f - %.1f", target_low, target_high);
+                }
+
+                // Apply the custom temperatures
+                auto call = id(thermostat_living).make_call();
+                call.set_target_temperature_low(target_low);
+                call.set_target_temperature_high(target_high);
+                call.perform();
+
+            # Update preset button after applying preset
+            - script.execute: update_preset_active_button_display
 
   - id: update_current_preset_if_active
     then:
       - delay: 50ms
-      - lambda: |-
-          // Only update if we're currently using the preset being modified
-          auto current_preset = id(thermostat_living).preset;
-          bool should_update = false;
-          float target_low = 20.0;
-          float target_high = 22.0;
-          
-          if (current_preset == CLIMATE_PRESET_HOME) {
-            target_low = id(preset_home_temp_low);
-            target_high = id(preset_home_temp_high);
-            should_update = true;
-          } else if (current_preset == CLIMATE_PRESET_AWAY) {
-            target_low = id(preset_away_temp_low);
-            target_high = id(preset_away_temp_high);
-            should_update = true;
-          } else if (current_preset == CLIMATE_PRESET_SLEEP) {
-            target_low = id(preset_sleep_temp_low);
-            target_high = id(preset_sleep_temp_high);
-            should_update = true;
-          }
-          
-          if (should_update) {
-            auto call = id(thermostat_living).make_call();
-            call.set_target_temperature_low(target_low);
-            call.set_target_temperature_high(target_high);
-            call.perform();
-            ESP_LOGI("thermostat", "Updated active preset temperatures: %.1f - %.1f", target_low, target_high);
-          }
+      - if:
+          condition:
+            lambda: 'return !id(presets_enabled);'
+          then:
+            - lambda: |-
+                ESP_LOGI("thermostat", "Presets disabled - not updating preset temperatures");
+          else:
+            # Only run the preset update logic if presets are enabled
+            - lambda: |-
+                // Only update if we're currently using the preset being modified
+                auto current_preset = id(thermostat_living).preset;
+                bool should_update = false;
+                float target_low = 20.0;
+                float target_high = 22.0;
+
+                if (current_preset == CLIMATE_PRESET_HOME) {
+                  target_low = id(preset_home_temp_low);
+                  target_high = id(preset_home_temp_high);
+                  should_update = true;
+                } else if (current_preset == CLIMATE_PRESET_AWAY) {
+                  target_low = id(preset_away_temp_low);
+                  target_high = id(preset_away_temp_high);
+                  should_update = true;
+                } else if (current_preset == CLIMATE_PRESET_SLEEP) {
+                  target_low = id(preset_sleep_temp_low);
+                  target_high = id(preset_sleep_temp_high);
+                  should_update = true;
+                }
+
+                if (should_update) {
+                  auto call = id(thermostat_living).make_call();
+                  call.set_target_temperature_low(target_low);
+                  call.set_target_temperature_high(target_high);
+                  call.perform();
+                  ESP_LOGI("thermostat", "Updated active preset temperatures: %.1f - %.1f", target_low, target_high);
+                } else {
+                  ESP_LOGD("thermostat", "No active preset to update");
+                }
+            
+            # Update the preset button display after changes
+            - script.execute: update_preset_active_button_display
 
   # Updated script to handle LVGL slider updates instead of spinbox
   - id: update_preset_from_spinbox
@@ -849,6 +1340,8 @@ climate:
     idle_action:
       - switch.turn_off: relay_1
 
+    # Replace the on_state section in your climate component with this updated version:
+
     on_state:
       - if:
           condition:
@@ -873,6 +1366,13 @@ climate:
             - lvgl.widget.update:
                 id: glow_obj
                 hidden: true
+      - if:
+          condition:
+            lambda: 'return x.action == esphome::climate::CLIMATE_ACTION_OFF;'
+          then:
+            - lvgl.widget.update:
+                id: glow_obj
+                hidden: true
 
       - lambda: |-
           if (id(update_from_button)) {
@@ -880,13 +1380,13 @@ climate:
             return;
           }
 
-          // clear all buttons
+          // clear all buttons - keep existing button logic
           lv_obj_clear_state(id(heat_btn), LV_STATE_CHECKED);
           lv_obj_clear_state(id(auto_btn), LV_STATE_CHECKED);
           lv_obj_clear_state(id(cool_btn), LV_STATE_CHECKED);
           lv_obj_clear_state(id(off_btn), LV_STATE_CHECKED);
 
-          // update the button state according to the current climate mode
+          // update the button state according to the current climate mode - keep existing logic
           if (x.mode == climate::CLIMATE_MODE_HEAT) {
             lv_obj_add_state(id(heat_btn), LV_STATE_CHECKED);
           } else if (x.mode == climate::CLIMATE_MODE_HEAT_COOL) {
@@ -897,59 +1397,15 @@ climate:
             lv_obj_add_state(id(off_btn), LV_STATE_CHECKED);
           }
 
-          // Helper function definitions inline
-          auto set_arc_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
-            lv_color_t current_color = lv_obj_get_style_arc_color(obj, part);
-            if (current_color.full != new_color.full) {
-              lv_obj_set_style_arc_color(obj, new_color, part);
-            }
-          };
-
-          auto set_border_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
-            lv_color_t current_color = lv_obj_get_style_border_color(obj, part);
-            if (current_color.full != new_color.full) {
-              lv_obj_set_style_border_color(obj, new_color, part);
-            }
-          };
-
-          auto set_bg_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
-            lv_color_t current_color = lv_obj_get_style_bg_color(obj, part);
-            if (current_color.full != new_color.full) {
-              lv_obj_set_style_bg_color(obj, new_color, part);
-            }
-          };
-
-          auto set_opa_if_different = [](lv_obj_t* obj, lv_opa_t new_opa, lv_part_t part, lv_style_prop_t prop) {
-            lv_opa_t current_opa = (prop == LV_STYLE_ARC_OPA) ? lv_obj_get_style_arc_opa(obj, part) : lv_obj_get_style_border_opa(obj, part);
-            if (current_opa != new_opa) {
-              if (prop == LV_STYLE_ARC_OPA) {
-                lv_obj_set_style_arc_opa(obj, new_opa, part);
-              } else {
-                lv_obj_set_style_border_opa(obj, new_opa, part);
-              }
-            }
-          };
-
-          auto set_pad_if_different = [](lv_obj_t* obj, lv_coord_t pad_value, lv_part_t part) {
-            lv_coord_t current_pad_top = lv_obj_get_style_pad_top(obj, part);
-            lv_coord_t current_pad_bottom = lv_obj_get_style_pad_bottom(obj, part);
-            lv_coord_t current_pad_left = lv_obj_get_style_pad_left(obj, part);
-            lv_coord_t current_pad_right = lv_obj_get_style_pad_right(obj, part);
-
-            if (current_pad_top != pad_value || current_pad_bottom != pad_value || current_pad_left != pad_value || current_pad_right != pad_value) {
-              lv_obj_set_style_pad_all(obj, pad_value, part);
-            }
-          };
-
           static float prev_low = -9999.0f;
           static float prev_high = -9999.0f;
           static float prev_current = -9999.0f;
-          static climate::ClimatePreset prev_preset = climate::CLIMATE_PRESET_NONE;  // ADD: Track previous preset
+          static climate::ClimatePreset prev_preset = climate::CLIMATE_PRESET_NONE;
 
           float low = x.target_temperature_low;
           float high = x.target_temperature_high;
           float current = x.current_temperature;
-          climate::ClimatePreset current_preset = x.preset.value_or(climate::CLIMATE_PRESET_NONE);  // ADD: Get current preset
+          climate::ClimatePreset current_preset = x.preset.value_or(climate::CLIMATE_PRESET_NONE);
           const float min_gap = 2.0f;
           const float min_temp = 10.0f;
           const float max_temp = 40.0f;
@@ -957,23 +1413,41 @@ climate:
           bool low_changed = (abs(low - prev_low) > 0.05);
           bool high_changed = (abs(high - prev_high) > 0.05);
           bool current_changed = (abs(current - prev_current) > 0.05);
-          bool preset_changed = (current_preset != prev_preset);  // ADD: Check preset change
+          bool preset_changed = (current_preset != prev_preset);
           bool pushed = false;
 
           // Check if TARGET temperatures changed from Home Assistant OR preset changed
           bool temp_changed_from_ha = false;
+          bool preset_changed_from_ha = false;
           
-          // Include preset changes in the detection logic
           if (!id(updating_from_lvgl)) {
-            if (low_changed || high_changed || preset_changed) {  // ADD: preset_changed condition
+            if (preset_changed) {
+              preset_changed_from_ha = true;
+              ESP_LOGD("thermostat", "Preset change detected from HA: preset=%d, presets_enabled=%s", 
+                      (int)current_preset, id(presets_enabled) ? "true" : "false");
+              
+              // If presets are disabled and we have valid previous temperatures, restore them
+              if (!id(presets_enabled) && prev_low != -9999.0f && prev_high != -9999.0f) {
+                ESP_LOGD("thermostat", "Presets disabled - ignoring temperature changes from preset");
+                // Restore the previous temperatures
+                id(thermostat_living).target_temperature_low = prev_low;
+                id(thermostat_living).target_temperature_high = prev_high;
+                low = prev_low;
+                high = prev_high;
+                low_changed = false;
+                high_changed = false;
+              }
+            }
+            
+            if ((low_changed || high_changed) && !preset_changed_from_ha) {
               temp_changed_from_ha = true;
-              ESP_LOGD("thermostat", "Temperature/Preset change detected: low=%.1f, high=%.1f, preset=%d", 
-                      low, high, (int)current_preset);  // MODIFIED: Include preset in log
+              ESP_LOGD("thermostat", "Temperature change detected: low=%.1f, high=%.1f", low, high);
             }
           }
 
-          // Maintaining the minimum distance between temperatures
-          if (high - low < min_gap) {
+          // Maintaining the minimum distance between temperatures - keep existing logic
+          // Only apply this if presets are enabled or if the change didn't come from a disabled preset
+          if ((id(presets_enabled) || !preset_changed_from_ha || prev_low == -9999.0f) && (high - low < min_gap)) {
             if (low_changed && !high_changed) {
               float new_high = low + min_gap;
               if (new_high > max_temp)
@@ -991,167 +1465,50 @@ climate:
             }
           }
 
-          // update the arcs with the correct values, regardless of the source
+          // update the arcs with the correct values
           int target_low_arc_value = int(low * 10);
           int target_high_arc_value = int(high * 10);
           
-          // We force the arcs to update to the correct values
           lv_arc_set_value(id(heating_arc), target_low_arc_value);
           lv_arc_set_value(id(cooling_arc), target_high_arc_value);
 
-          // Retrieve variables for arc state and update styles
-          int cooling_value = lv_arc_get_value(id(cooling_arc));
-          int heating_value = lv_arc_get_value(id(heating_arc));
-          int actual_value = lv_arc_get_value(id(dual_current_temp_arc));
-          int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
-          int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
-          lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
-
-          int normal_value = (current_mode == LV_ARC_MODE_REVERSE) ? (max_val + min_val - actual_value) : actual_value;
-
+          // Get button states for the script
           bool heat_checked = lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);
           bool cool_checked = lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);
 
-          // Update arc styles according to conditions
-          if (heating_value > normal_value) {
-            if (current_mode != LV_ARC_MODE_NORMAL) {
-              lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
-              lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
-            }
-            set_arc_color_if_different(id(dual_current_temp_arc), DARK_ORANGE, LV_PART_INDICATOR);
-            set_arc_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_INDICATOR);
-            set_border_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
-
-            set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
-            set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
-
-          } else if (cooling_value < normal_value) {
-            if (current_mode != LV_ARC_MODE_REVERSE) {
-              lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_REVERSE);
-              lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
-            }
-            set_arc_color_if_different(id(dual_current_temp_arc), DARK_BLUE, LV_PART_INDICATOR);
-            set_arc_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_MAIN);
-            set_border_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
-            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
-
-            set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
-            set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_BLUE, LV_PART_KNOB);
-            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
-
-          } else {
-            if (current_mode != LV_ARC_MODE_NORMAL) {
-              lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
-              lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
-            }
-            set_arc_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
-            set_border_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-
-            set_arc_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
-            set_border_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-
-            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
-            set_pad_if_different(id(dual_current_temp_arc), -10, LV_PART_KNOB);
-            set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
-
-            if (heat_checked) {
-              set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-            } else if (cool_checked) {
-              set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-            }
-          }
-
-          // Only clear button states if change comes from HA or preset
-          if (temp_changed_from_ha) {  // This now includes preset changes
+          // Handle button state clearing if temperature changed from HA
+          // Only clear if presets are enabled or if it wasn't a preset change
+          if (temp_changed_from_ha || (preset_changed_from_ha && id(presets_enabled))) {
             if (heat_checked) {
               lv_obj_clear_state(id(heat_sel_button), LV_STATE_CHECKED);
-              lv_obj_set_style_text_color(id(heat_setpoint_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              lv_obj_set_style_text_color(id(heat_decimal_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              lv_obj_set_style_text_color(id(heat_celsius_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              // Change border_color for temp buttons to NEUTRAL_GRAY
-              set_border_color_if_different(id(temp_plus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              set_border_color_if_different(id(temp_minus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              if (heating_value > normal_value) {
-                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-                set_bg_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-              }
-              else if (cooling_value < normal_value){
-                set_bg_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
-                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-              }
-              else{
-                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-              }
+              heat_checked = false; // Update for script call
             }
-
-            else if (cool_checked) {
+            if (cool_checked) {
               lv_obj_clear_state(id(cool_sel_button), LV_STATE_CHECKED);
-              lv_obj_set_style_text_color(id(cool_setpoint_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              lv_obj_set_style_text_color(id(cool_decimal_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              lv_obj_set_style_text_color(id(cool_celsius_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              // Change border_color for temp buttons to NEUTRAL_GRAY
-              set_border_color_if_different(id(temp_plus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              set_border_color_if_different(id(temp_minus_btn), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-              if (heating_value > normal_value) {
-                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-                set_bg_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-              }
-              else if (cooling_value < normal_value){
-                set_bg_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
-                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-              }
-              else{
-                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-              }
-            }
-
-            else {
-              if (heating_value > normal_value) {
-                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-                set_bg_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-              }
-              else if (cooling_value < normal_value){
-                set_bg_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
-                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-              }
-              else{
-                set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-                set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-              }
+              cool_checked = false; // Update for script call
             }
           }
 
-          // Color update based on climate status
-          lv_color_t status_color;
-          switch (x.action) {
-            case esphome::climate::CLIMATE_ACTION_HEATING:
-              status_color = BRIGHT_ORANGE;
-              break;
-            case esphome::climate::CLIMATE_ACTION_COOLING:
-              status_color = BRIGHT_BLUE;
-              break;
-            case esphome::climate::CLIMATE_ACTION_IDLE:
-              status_color = WHITE;
-              break;
-            default: // OFF sau alte stări
-              status_color = LIGHT_GRAY;
-              break;
+          // keep previous values updated for next call - only update if we're not ignoring the preset change
+          if (id(presets_enabled) || !preset_changed_from_ha || prev_low == -9999.0f) {
+            prev_low = low;
+            prev_high = high;
+            prev_current = current;
+            prev_preset = current_preset;
+          } else {
+            // If we ignored the preset change, only update the preset but keep the old temperatures
+            prev_preset = current_preset;
           }
-          
-          // Update colors for labels based on status
-          lv_obj_set_style_text_color(id(dual_action_label), status_color, LV_STATE_DEFAULT);
-          lv_obj_set_style_text_color(id(dual_temperature_label), status_color, LV_STATE_DEFAULT);
-          lv_obj_set_style_text_color(id(thermometer_sign_label), status_color, LV_STATE_DEFAULT);
-
-          // keep previous values updated for next call
-          prev_low = low;
-          prev_high = high;
-          prev_current = current;
-          prev_preset = current_preset;  // ADD: Track preset changes
+      
+      # Call the NEW reusable script for arc styling with automatic OFF mode detection
+      - script.execute:
+          id: update_thermostat_display_colors
+          heating_value: !lambda 'return int(x.target_temperature_low * 10);'
+          cooling_value: !lambda 'return int(x.target_temperature_high * 10);'
+          current_temp_value: 0  # Let script calculate from arc
+          heat_checked: !lambda 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
+          cool_checked: !lambda 'return lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);'
+          force_off_mode: false  # Let the script auto-detect OFF mode
     
       - lvgl.label.update:
           id: dual_temperature_label
@@ -1196,6 +1553,8 @@ climate:
       - lvgl.label.update:
           id: dual_action_label
           text: !lambda return std::string(LOG_STR_ARG(climate_action_to_string(x.action)));
+
+      - script.execute: update_preset_active_button_display
           
       - logger.log:
           format: "climate mode=%s, temp_low=%.1f, temp_high=%.1f"
@@ -1309,6 +1668,14 @@ font:
           "\U000F0717",  # snowflake
           "\U000F0425",  # power-off
           "\U000F0075",  # auto
+          "\U000F02DC",  # home
+          "\U000F0F9C",  # return home
+          "\U000F0ED9",  # weekend
+          "\U000F1A46",  # away (not-home)
+          "\U000F0904",  # sleep
+          "\U000F145E",  # apply
+          "\U000F1668",  # custom
+          "\U000F1055",  # vacation
           "\U000F0493"   # settings
         ]
   
@@ -1457,7 +1824,9 @@ lvgl:
               border_color: !lambda return BRIGHT_BLUE;
               border_opa: 0
           
-        # Foregroung adjustment arc
+# Replace the dual_setpoint_arc on_value section with this updated version:
+
+        # Foreground adjustment arc
         - arc:
             id: dual_setpoint_arc
             align: CENTER
@@ -1482,10 +1851,8 @@ lvgl:
 
             on_value:
               then:
-                # Set flag to indicate update is coming from LVGL
                 - lambda: 'id(updating_from_lvgl) = true;'
                 
-                # Update the target temperature based on the selected button
                 - if:
                     condition:
                       - lambda: 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
@@ -1502,144 +1869,39 @@ lvgl:
                           id: thermostat_living
                           target_temperature_high: !lambda 'return x / 10.0;'
 
-                # Lambda for updating colors and styles of arcs and their indicators
                 - lambda: |-
-                    // Helper functions
-                    auto set_arc_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
-                      lv_color_t current_color = lv_obj_get_style_arc_color(obj, part);
-                      if (current_color.full != new_color.full) {
-                        lv_obj_set_style_arc_color(obj, new_color, part);
-                      }
-                    };
-
-                    auto set_border_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
-                      lv_color_t current_color = lv_obj_get_style_border_color(obj, part);
-                      if (current_color.full != new_color.full) {
-                        lv_obj_set_style_border_color(obj, new_color, part);
-                      }
-                    };
-
-                    auto set_bg_color_if_different = [](lv_obj_t* obj, lv_color_t new_color, lv_part_t part) {
-                      lv_color_t current_color = lv_obj_get_style_bg_color(obj, part);
-                      if (current_color.full != new_color.full) {
-                        lv_obj_set_style_bg_color(obj, new_color, part);
-                      }
-                    };
-
-                    auto set_opa_if_different = [](lv_obj_t* obj, lv_opa_t new_opa, lv_part_t part, lv_style_prop_t prop) {
-                      lv_opa_t current_opa = (prop == LV_STYLE_ARC_OPA) ? lv_obj_get_style_arc_opa(obj, part) : lv_obj_get_style_border_opa(obj, part);
-                      if (current_opa != new_opa) {
-                        if (prop == LV_STYLE_ARC_OPA) {
-                          lv_obj_set_style_arc_opa(obj, new_opa, part);
-                        } else {
-                          lv_obj_set_style_border_opa(obj, new_opa, part);
-                        }
-                      }
-                    };
-
-                    auto set_pad_if_different = [](lv_obj_t* obj, lv_coord_t pad_value, lv_part_t part) {
-                      lv_coord_t current_pad_top = lv_obj_get_style_pad_top(obj, part);
-                      lv_coord_t current_pad_bottom = lv_obj_get_style_pad_bottom(obj, part);
-                      lv_coord_t current_pad_left = lv_obj_get_style_pad_left(obj, part);
-                      lv_coord_t current_pad_right = lv_obj_get_style_pad_right(obj, part);
-
-                      if (current_pad_top != pad_value || current_pad_bottom != pad_value || current_pad_left != pad_value || current_pad_right != pad_value) {
-                        lv_obj_set_style_pad_all(obj, pad_value, part);
-                      }
-                    };
-
-                    // Retrieve current values and arc mode
+                    // Handle arc value updates and minimum distance logic
                     int dual_value = x;
                     int cooling_value = lv_arc_get_value(id(cooling_arc));
                     int heating_value = lv_arc_get_value(id(heating_arc));
-                    int actual_value = lv_arc_get_value(id(dual_current_temp_arc));
-                    int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
-                    int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
-                    lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
-
-                    int normal_value = (current_mode == LV_ARC_MODE_REVERSE) ? (max_val + min_val - actual_value) : actual_value;
-
+                    
                     bool heat_checked = lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);
                     bool cool_checked = lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);
 
-                    // Updates arc values based on the selected button
                     if (heat_checked) {
                       lv_arc_set_value(id(heating_arc), dual_value);
-                      // Maintain minimum distance
                       if (cooling_value < dual_value + 20) {
                         lv_arc_set_value(id(cooling_arc), dual_value + 20);
-                        // Also update the climate for cooling
                         id(thermostat_living).target_temperature_high = (dual_value + 20) / 10.0;
                       }
                     } else if (cool_checked) {
                       lv_arc_set_value(id(cooling_arc), dual_value);
-                      // Maintain minimum distance
                       if (heating_value > dual_value - 20) {
                         lv_arc_set_value(id(heating_arc), dual_value - 20);
-                        // Also update the climate for heating
                         id(thermostat_living).target_temperature_low = (dual_value - 20) / 10.0;
                       }
                     }
 
-                    // Update values after changes
-                    cooling_value = lv_arc_get_value(id(cooling_arc));
-                    heating_value = lv_arc_get_value(id(heating_arc));
-
-                    // Apply styles based on current conditions
-                    if (heating_value > normal_value) {
-                      if (current_mode != LV_ARC_MODE_NORMAL) {
-                        lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
-                        lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
-                      }
-                      set_arc_color_if_different(id(dual_current_temp_arc), DARK_ORANGE, LV_PART_INDICATOR);
-                      set_arc_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_INDICATOR);
-                      set_arc_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
-                      set_border_color_if_different(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
-
-                      set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
-                      set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
-
-                    } else if (cooling_value < normal_value) {
-                      if (current_mode != LV_ARC_MODE_REVERSE) {
-                        lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_REVERSE);
-                        lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
-                      }
-                      set_arc_color_if_different(id(dual_current_temp_arc), DARK_BLUE, LV_PART_INDICATOR);
-                      set_arc_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_MAIN);
-                      set_arc_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
-                      set_border_color_if_different(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
-                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
-
-                      set_pad_if_different(id(dual_current_temp_arc), 0, LV_PART_KNOB);
-                      set_border_color_if_different(id(dual_current_temp_arc), BRIGHT_BLUE, LV_PART_KNOB);
-                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_100, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
-
-                    } else {
-                      if (current_mode != LV_ARC_MODE_NORMAL) {
-                        lv_arc_set_mode(id(dual_current_temp_arc), LV_ARC_MODE_NORMAL);
-                        lv_arc_set_value(id(dual_current_temp_arc), max_val + min_val - actual_value);
-                      }
-                      set_arc_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_INDICATOR);
-                      set_border_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-
-                      set_arc_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_MAIN);
-                      set_border_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-
-                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_INDICATOR, LV_STYLE_ARC_OPA);
-                      set_pad_if_different(id(dual_current_temp_arc), -10, LV_PART_KNOB);
-                      set_opa_if_different(id(dual_current_temp_arc), LV_OPA_0, LV_PART_KNOB, LV_STYLE_BORDER_OPA);
-
-                      if (heat_checked) {
-                        set_bg_color_if_different(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-                      }
-                      else if (cool_checked) {
-                        set_bg_color_if_different(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-                      }
-                    }
+                # Call the NEW color management script
+                - script.execute:
+                    id: update_thermostat_display_colors
+                    heating_value: !lambda 'return lv_arc_get_value(id(heating_arc));'
+                    cooling_value: !lambda 'return lv_arc_get_value(id(cooling_arc));'
+                    current_temp_value: 0  # Let script calculate from arc
+                    heat_checked: !lambda 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
+                    cool_checked: !lambda 'return lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);'
+                    force_off_mode: false  # Let the script auto-detect OFF mode
                 
-                # Reset flag after processing (using a delay to ensure climate update is processed)
                 - delay: 100ms
                 - lambda: 'id(updating_from_lvgl) = false;'
             
@@ -1715,7 +1977,9 @@ lvgl:
             y: 74
             x: -40
 
-        # Plus button - Increase temperature with 0.1 step
+        # Replace your plus and minus button on_click sections with these updated versions:
+
+        # Plus button - ADD call to new color script
         - button: 
             id: temp_plus_btn
             align: CENTER
@@ -1741,15 +2005,15 @@ lvgl:
                     float current_low = id(thermostat_living).target_temperature_low;
                     float new_low = current_low + step;
 
-                    // Menține diferența minimă de 2° între low și high
+                    // Keep the minimum difference of 2° between low and high
                     if (new_low + 2.0 <= id(thermostat_living).target_temperature_high) {
                       id(thermostat_living).target_temperature_low = new_low;
-                      // Actualizează climate
+                      // Update climate
                       auto call = id(thermostat_living).make_call();
                       call.set_target_temperature_low(new_low);
                       call.perform();
 
-                      // Actualizează arcul dual_setpoint_arc la valoarea low * 10 (pentru consistență cu arc)
+                      // Update dual_setpoint_arc to the low * 10 value (for the arc consistency)
                       lv_arc_set_value(id(dual_setpoint_arc), int(new_low * 10));
                     }
                   }
@@ -1757,20 +2021,29 @@ lvgl:
                     float current_high = id(thermostat_living).target_temperature_high;
                     float new_high = current_high + step;
 
-                    // Limita superioară max 40
+                    // High limit max 40
                     if (new_high <= 40.0f) {
                       id(thermostat_living).target_temperature_high = new_high;
-                      // Actualizează climate
+                      // Update climate
                       auto call = id(thermostat_living).make_call();
                       call.set_target_temperature_high(new_high);
                       call.perform();
 
-                      // Actualizează arcul dual_setpoint_arc la valoarea high * 10
+                      // Update dual_setpoint_arc to the high * 10 value
                       lv_arc_set_value(id(dual_setpoint_arc), int(new_high * 10));
                     }
                   }
 
                   id(updating_from_lvgl) = false;
+              # Call the NEW color management script after temperature change
+              - script.execute:
+                  id: update_thermostat_display_colors
+                  heating_value: !lambda 'return int(id(thermostat_living).target_temperature_low * 10);'
+                  cooling_value: !lambda 'return int(id(thermostat_living).target_temperature_high * 10);'
+                  current_temp_value: !lambda 'return int(id(thermostat_living).current_temperature * 10);'
+                  heat_checked: !lambda 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
+                  cool_checked: !lambda 'return lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);'
+                  force_off_mode: false
             widgets: 
               - label: 
                   width: 100%
@@ -1781,7 +2054,7 @@ lvgl:
                   text_font: roboto_32
                   text_color: !lambda return NEUTRAL_GRAY;
 
-        # Minus button - Decrease temperature with 0.1 step
+        # Minus button - ADD call to new color script
         - button:
             id: temp_minus_btn
             align: CENTER
@@ -1807,12 +2080,12 @@ lvgl:
                     float current_low = id(thermostat_living).target_temperature_low;
                     float new_low = current_low - step;
 
-                    // Limita minimă low 10.0
+                    // Low limit min. 10.0
                     if (new_low >= 10.0f) {
-                      // Menține diferența minimă de 2° între low și high
+                      // Keep the minimum difference of 2° between low and high
                       if (new_low + 2.0 <= id(thermostat_living).target_temperature_high) {
                         id(thermostat_living).target_temperature_low = new_low;
-                        // Actualizează climate
+                        // Update climate
                         auto call = id(thermostat_living).make_call();
                         call.set_target_temperature_low(new_low);
                         call.perform();
@@ -1825,10 +2098,10 @@ lvgl:
                     float current_high = id(thermostat_living).target_temperature_high;
                     float new_high = current_high - step;
 
-                    // Limita minimă high este low + 2
+                    // Low limit for high is low + 2
                     if (new_high >= id(thermostat_living).target_temperature_low + 2.0) {
                       id(thermostat_living).target_temperature_high = new_high;
-                      // Actualizează climate
+                      // Update climate
                       auto call = id(thermostat_living).make_call();
                       call.set_target_temperature_high(new_high);
                       call.perform();
@@ -1838,6 +2111,15 @@ lvgl:
                   }
 
                   id(updating_from_lvgl) = false;
+              # Call the NEW color management script after temperature change
+              - script.execute:
+                  id: update_thermostat_display_colors
+                  heating_value: !lambda 'return int(id(thermostat_living).target_temperature_low * 10);'
+                  cooling_value: !lambda 'return int(id(thermostat_living).target_temperature_high * 10);'
+                  current_temp_value: !lambda 'return int(id(thermostat_living).current_temperature * 10);'
+                  heat_checked: !lambda 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
+                  cool_checked: !lambda 'return lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);'
+                  force_off_mode: false
             widgets:
               - label:
                   width: 100%
@@ -1848,6 +2130,7 @@ lvgl:
                   text_font: roboto_32
                   text_color: !lambda return NEUTRAL_GRAY;
 
+        # Heat selection button - ADD call to new color script
         - button:
             id: heat_sel_button
             align: CENTER
@@ -1875,40 +2158,19 @@ lvgl:
                   if (lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED))
                     lv_obj_clear_state(id(cool_sel_button), LV_STATE_CHECKED);
 
-                  // Calculate normal_value for comparisons
-                  int cooling_value = lv_arc_get_value(id(cooling_arc));
-                  int actual_value = lv_arc_get_value(id(dual_current_temp_arc));
-                  int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
-                  int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
-                  lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
-                  int normal_value = (current_mode == LV_ARC_MODE_REVERSE) ? (max_val + min_val - actual_value) : actual_value;
-
                   // Set dual_setpoint_arc to the value of heating_arc
                   lv_arc_set_value(id(dual_setpoint_arc), lv_arc_get_value(id(heating_arc)));
+              # Call the new color management script
+              - script.execute:
+                  id: update_thermostat_display_colors
+                  heating_value: !lambda 'return lv_arc_get_value(id(heating_arc));'
+                  cooling_value: !lambda 'return lv_arc_get_value(id(cooling_arc));'
+                  current_temp_value: 0  # Let script calculate from arc
+                  heat_checked: true  # Heat is now selected
+                  cool_checked: false
+                  force_off_mode: false
 
-                  // Configure heating and cooling knob colors
-                  lv_obj_set_style_bg_color(id(heating_arc), WHITE, LV_PART_KNOB);
-
-                  if (cooling_value < normal_value) {
-                    lv_obj_set_style_bg_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
-                    lv_obj_set_style_border_color(id(cooling_arc), BRIGHT_BLUE, LV_PART_KNOB);
-                  } else {
-                    lv_obj_set_style_bg_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-                    lv_obj_set_style_border_color(id(cooling_arc), DARK_BLUE, LV_PART_KNOB);
-                  }
-
-                  // Updates the styles of heat/cool buttons and labels
-                  lv_obj_set_style_border_color(id(temp_plus_btn), DARK_ORANGE, LV_STATE_DEFAULT);
-                  lv_obj_set_style_border_color(id(temp_minus_btn), DARK_ORANGE, LV_STATE_DEFAULT);
-
-                  lv_obj_set_style_text_color(id(heat_setpoint_label), WHITE, LV_STATE_DEFAULT);
-                  lv_obj_set_style_text_color(id(heat_decimal_label), WHITE, LV_STATE_DEFAULT);
-                  lv_obj_set_style_text_color(id(heat_celsius_label), WHITE, LV_STATE_DEFAULT);
-
-                  lv_obj_set_style_text_color(id(cool_setpoint_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-                  lv_obj_set_style_text_color(id(cool_decimal_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-                  lv_obj_set_style_text_color(id(cool_celsius_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-
+        # Cool selection button - ADD call to new color script
         - button:
             id: cool_sel_button
             align: CENTER
@@ -1936,42 +2198,35 @@ lvgl:
                   if (lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED))
                     lv_obj_clear_state(id(heat_sel_button), LV_STATE_CHECKED);
 
-                  int heating_value = lv_arc_get_value(id(heating_arc));
-                  int actual_value = lv_arc_get_value(id(dual_current_temp_arc));
-                  int max_val = lv_arc_get_max_value(id(dual_current_temp_arc));
-                  int min_val = lv_arc_get_min_value(id(dual_current_temp_arc));
-                  lv_arc_mode_t current_mode = lv_arc_get_mode(id(dual_current_temp_arc));
-                  int normal_value = (current_mode == LV_ARC_MODE_REVERSE) ? (max_val + min_val - actual_value) : actual_value;
-
+                  // Set dual_setpoint_arc to the value of cooling_arc
                   lv_arc_set_value(id(dual_setpoint_arc), lv_arc_get_value(id(cooling_arc)));
+              # Call the new color management script
+              - script.execute:
+                  id: update_thermostat_display_colors
+                  heating_value: !lambda 'return lv_arc_get_value(id(heating_arc));'
+                  cooling_value: !lambda 'return lv_arc_get_value(id(cooling_arc));'
+                  current_temp_value: 0  # Let script calculate from arc
+                  heat_checked: false
+                  cool_checked: true  # Cool is now selected
+                  force_off_mode: false
 
-                  lv_obj_set_style_bg_color(id(cooling_arc), WHITE, LV_PART_KNOB);
+        - button:
+            id: btn_background
+            align: CENTER
+            y: 210
+            width: 420
+            height: 40
+            bg_color: !lambda return DARK_GRAY;
+            checkable: false
+            shadow_width: 0
 
-                  if (heating_value > normal_value) {
-                    lv_obj_set_style_bg_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-                    lv_obj_set_style_border_color(id(heating_arc), BRIGHT_ORANGE, LV_PART_KNOB);
-                  } else {
-                    lv_obj_set_style_bg_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-                    lv_obj_set_style_border_color(id(heating_arc), DARK_ORANGE, LV_PART_KNOB);
-                  }
-
-                  lv_obj_set_style_border_color(id(temp_plus_btn), DARK_BLUE, LV_STATE_DEFAULT);
-                  lv_obj_set_style_border_color(id(temp_minus_btn), DARK_BLUE, LV_STATE_DEFAULT);
-
-                  lv_obj_set_style_text_color(id(heat_setpoint_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-                  lv_obj_set_style_text_color(id(heat_decimal_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-                  lv_obj_set_style_text_color(id(heat_celsius_label), NEUTRAL_GRAY, LV_STATE_DEFAULT);
-
-                  lv_obj_set_style_text_color(id(cool_setpoint_label), WHITE, LV_STATE_DEFAULT);
-                  lv_obj_set_style_text_color(id(cool_decimal_label), WHITE, LV_STATE_DEFAULT);
-                  lv_obj_set_style_text_color(id(cool_celsius_label), WHITE, LV_STATE_DEFAULT);
-
+        # Heat button - ADD call to new color script
         - button:
             id: heat_btn
             align: CENTER
             x: 159
             y: 210
-            width: 100
+            width: 105
             checkable: true
             bg_color: !lambda return DARK_GRAY;
             shadow_width: 0
@@ -1991,6 +2246,15 @@ lvgl:
                   lv_obj_clear_state(id(off_btn), LV_STATE_CHECKED);
                   delay(80);
                   id(update_from_button) = false;
+              # Call color update script for immediate visual feedback
+              - script.execute:
+                  id: update_thermostat_display_colors
+                  heating_value: !lambda 'return int(id(thermostat_living).target_temperature_low * 10);'
+                  cooling_value: !lambda 'return int(id(thermostat_living).target_temperature_high * 10);'
+                  current_temp_value: !lambda 'return int(id(thermostat_living).current_temperature * 10);'
+                  heat_checked: !lambda 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
+                  cool_checked: !lambda 'return lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);'
+                  force_off_mode: false
             widgets:
               - label:
                   align: CENTER
@@ -2002,7 +2266,7 @@ lvgl:
             align: CENTER
             x: -53
             y: 210
-            width: 100
+            width: 105
             checkable: true
             bg_color: !lambda return DARK_GRAY;
             shadow_width: 0
@@ -2022,6 +2286,15 @@ lvgl:
                   lv_obj_clear_state(id(off_btn), LV_STATE_CHECKED);
                   delay(80);
                   id(update_from_button) = false;
+              # Call color update script for immediate visual feedback
+              - script.execute:
+                  id: update_thermostat_display_colors
+                  heating_value: !lambda 'return int(id(thermostat_living).target_temperature_low * 10);'
+                  cooling_value: !lambda 'return int(id(thermostat_living).target_temperature_high * 10);'
+                  current_temp_value: !lambda 'return int(id(thermostat_living).current_temperature * 10);'
+                  heat_checked: !lambda 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
+                  cool_checked: !lambda 'return lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);'
+                  force_off_mode: false
             widgets:
               - label:
                   align: CENTER
@@ -2033,7 +2306,7 @@ lvgl:
             align: CENTER
             x: 53
             y: 210
-            width: 100
+            width: 105
             checkable: true
             bg_color: !lambda return DARK_GRAY;
             shadow_width: 0
@@ -2053,6 +2326,15 @@ lvgl:
                   lv_obj_clear_state(id(off_btn), LV_STATE_CHECKED);
                   delay(80);
                   id(update_from_button) = false;
+              # Call color update script for immediate visual feedback
+              - script.execute:
+                  id: update_thermostat_display_colors
+                  heating_value: !lambda 'return int(id(thermostat_living).target_temperature_low * 10);'
+                  cooling_value: !lambda 'return int(id(thermostat_living).target_temperature_high * 10);'
+                  current_temp_value: !lambda 'return int(id(thermostat_living).current_temperature * 10);'
+                  heat_checked: !lambda 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
+                  cool_checked: !lambda 'return lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);'
+                  force_off_mode: false
             widgets:
               - label:
                   align: CENTER
@@ -2064,7 +2346,7 @@ lvgl:
             align: CENTER
             x: -159
             y: 210
-            width: 100
+            width: 105
             checkable: true
             bg_color: !lambda return DARK_GRAY;
             shadow_width: 0
@@ -2084,15 +2366,24 @@ lvgl:
                   lv_obj_clear_state(id(cool_btn), LV_STATE_CHECKED);
                   delay(80);
                   id(update_from_button) = false;
+              # Force OFF mode styling immediately
+              - script.execute:
+                  id: update_thermostat_display_colors
+                  heating_value: !lambda 'return int(id(thermostat_living).target_temperature_low * 10);'
+                  cooling_value: !lambda 'return int(id(thermostat_living).target_temperature_high * 10);'
+                  current_temp_value: !lambda 'return int(id(thermostat_living).current_temperature * 10);'
+                  heat_checked: !lambda 'return lv_obj_has_state(id(heat_sel_button), LV_STATE_CHECKED);'
+                  cool_checked: !lambda 'return lv_obj_has_state(id(cool_sel_button), LV_STATE_CHECKED);'
+                  force_off_mode: true  # Force OFF mode styling
             widgets:
               - label:
                   align: CENTER
                   text_font: material_icons_24
                   text: "\U000F0425"
-                  
+
         - button:
-             id: presets_btn
-             x: 400
+             id: presets_active_btn
+             x: 10
              y: 30
              width: 60
              height: 60
@@ -2102,6 +2393,26 @@ lvgl:
              widgets:
                - label:
                   align: CENTER
+                  x: 10
+                  y: 4
+                  text_font: roboto_32
+                  text: "\U000F02DC"
+                  text_color: !lambda return DARK_GRAY;
+
+        - button:
+             id: presets_btn
+             x: 410
+             y: 30
+             width: 60
+             height: 60
+             bg_color: !lambda return DARK_GRAY;
+             bg_opa: 0
+             shadow_width: 0
+             widgets:
+               - label:
+                  align: CENTER
+                  x: -10
+                  y: 4
                   text_font: roboto_32
                   text: "\U000F0493"
                   text_color: !lambda return DARK_GRAY;
