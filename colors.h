@@ -12,6 +12,8 @@
 #define LIGHT_GRAY_HEX 0x848484
 #define NEUTRAL_GRAY_HEX 0x565656
 #define AMBER_HEX 0xFFC107
+#define DARK_PURPLE_HEX 0x341539
+#define DARK_GREEN_HEX 0x2E6F40
 
 // Color constants
 static const lv_color_t WHITE = lv_color_hex(WHITE_HEX);
@@ -24,3 +26,5 @@ static const lv_color_t DARK_GRAY = lv_color_hex(DARK_GRAY_HEX);
 static const lv_color_t LIGHT_GRAY = lv_color_hex(LIGHT_GRAY_HEX);
 static const lv_color_t NEUTRAL_GRAY = lv_color_hex(NEUTRAL_GRAY_HEX);
 static const lv_color_t AMBER = lv_color_hex(AMBER_HEX);
+static const lv_color_t DARK_PURPLE = lv_color_hex(DARK_PURPLE_HEX);
+static const lv_color_t DARK_GREEN = lv_color_hex(DARK_GREEN_HEX);
