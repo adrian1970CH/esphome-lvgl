@@ -1032,8 +1032,7 @@ script:
           heat_checked: !lambda 'return heat_checked;'
           cool_checked: !lambda 'return cool_checked;'
           force_off_mode: false
-
-  # Other existing scripts remain the same...
+          
   - id: update_preset_active_button_display
     then:
       - lambda: |-
@@ -1109,7 +1108,6 @@ script:
           ESP_LOGD("presets", "Preset button updated - Current: %.1f-%.1f, Preset: %d", 
                    current_low, current_high, current_preset.has_value() ? (int)current_preset.value() : -1);
 
-  # Rest of your existing scripts remain unchanged...
   - id: apply_custom_preset_temperatures
     then:
       - if:
